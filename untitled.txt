@@ -15,6 +15,7 @@ local GuiService = game:GetService('GuiService')
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService('ReplicatedStorage')
 local Stats = game:GetService("Stats")
+local InsertService = game:GetService("InsertService") -- Added for Avatar Changer
 
 local LocalPlayer = Players.LocalPlayer
 local clientCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -66,7 +67,22 @@ local headLoop = nil
 local AutoManualSpamEnabled = false
 local ManualSpamActive = false
 local recentTargetChanges = {} -- New variable for tracking ball target changes
-local currentMusicSound = nil -- For Music Player
+
+-- Global variables for new features
+getgenv().AutoFarmEnabled = false
+getgenv().OrbitSpeed = 20
+getgenv().OrbitHeight = 5
+getgenv().OrbitDistance = 10
+getgenv().AutoFarmBodyVelocity = nil
+
+getgenv().CurrentAmbientR = 128
+getgenv().CurrentAmbientG = 128
+getgenv().CurrentAmbientB = 128
+
+getgenv().CurrentMusicId = ""
+getgenv().MusicPlayer = nil
+getgenv().JumpPower = 50
+getgenv().WalkSpeed = 16
 
 -- Remote detection
 task.spawn(function()
@@ -167,14 +183,6 @@ function Auto_Parry.Parry_Animation()
             end
         end
     end
-    -- Fix: Use a valid animation ID here if the game's default `GrabParry` asset is causing issues.
-    -- If the `Parry_Animation` found above is the one that's failing, you might need to manually
-    -- create an Animation object with a working AssetID.
-    -- Example (replace YOUR_VALID_ANIMATION_ID):
-    -- if not Parry_Animation or not Parry_Animation.AnimationId then
-    --     Parry_Animation = Instance.new("Animation")
-    --     Parry_Animation.AnimationId = "rbxassetid://YOUR_VALID_ANIMATION_ID" -- Replace this!
-    -- end
 
     -- Ensure Parry_Animation is an Animation instance before loading
     if Parry_Animation and Parry_Animation:IsA("Animation") then
@@ -397,7 +405,6 @@ function Auto_Parry.Is_Curved()
     local Direction_Similarity = Direction:Dot(Direction_Difference)
     local Dot_Difference = Dot - Direction_Similarity
     local Distance = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Magnitude
-    -- Fix: Changed :GetValue() to .Value
     local Pings = Stats.Network.ServerStatsItem['Data Ping'].Value
     local Dot_Threshold = 0.5 - (Pings / 1000)
     local Reach_Time = Distance / Speed - (Pings / 1000)
@@ -457,7 +464,7 @@ local function GetBall()
         if Ball:FindFirstChild("ff") then return Ball end
     end
     return nil
-}
+end
 
 local function SpamInput()
     if InputTask then return end
@@ -503,7 +510,7 @@ end
 local function toggleManualSpam(activate)
     ManualSpamActive = activate
     local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
-    if button then -- Fix: Added check for button existence
+    if button then
         if AutoManualSpamEnabled and not ManualSpamActive then
             button.Text = "Auto"
             button.TextColor3 = Color3.new(0, 0, 1)
@@ -539,7 +546,6 @@ local function checkAutoManualSpam()
         return
     end
     Auto_Parry.Closest_Player()
-    -- Fix: Changed :GetValue() to .Value
     local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value
     local Ping_Threshold = math.clamp(Ping / 10, 1, 16)
     local Ball_Target = Ball:GetAttribute('target')
@@ -589,6 +595,49 @@ Balls.ChildRemoved:Connect(function()
     recentTargetChanges = {}
 end)
 
+-- New Auto Farm Logic
+local function AutoFarmLogic()
+    local ball = Auto_Parry.Get_Ball()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    if not ball or not char or not hrp or not getgenv().AutoFarmEnabled then
+        if getgenv().AutoFarmBodyVelocity then
+            getgenv().AutoFarmBodyVelocity:Destroy()
+            getgenv().AutoFarmBodyVelocity = nil
+        end
+        return
+    end
+
+    if not getgenv().AutoFarmBodyVelocity then
+        getgenv().AutoFarmBodyVelocity = Instance.new("BodyVelocity")
+        getgenv().AutoFarmBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        getgenv().AutoFarmBodyVelocity.Parent = hrp
+    end
+
+    local ballPos = ball.Position
+    local hrpPos = hrp.Position
+
+    -- Calculate the vector from ball to player, flattened on the XZ plane
+    local directionToPlayer = (hrpPos - ballPos).Unit * Vector3.new(1, 0, 1)
+    if directionToPlayer.Magnitude == 0 then directionToPlayer = Vector3.new(1, 0, 0) end -- Avoid NaN
+
+    -- Calculate the tangent direction for orbiting
+    local orbitDirection = directionToPlayer:Cross(Vector3.new(0, 1, 0)).Unit
+
+    -- Calculate the target position for orbiting
+    local targetPosition = ballPos + orbitDirection * getgenv().OrbitDistance + Vector3.new(0, getgenv().OrbitHeight, 0)
+
+    -- Calculate velocity towards the target position
+    local desiredVelocity = (targetPosition - hrpPos).Unit * getgenv().OrbitSpeed
+
+    -- Apply the velocity
+    getgenv().AutoFarmBodyVelocity.Velocity = desiredVelocity
+end
+
+-- Hook Auto Farm to Heartbeat
+Connections_Manager['Auto Farm Logic'] = RunService.Heartbeat:Connect(AutoFarmLogic)
+
 -- New UI with Allusive-UI
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/MarchHubOnTopFr/Allusive-UI/refs/heads/main/Source.lua"))()
 local main = Library.new()
@@ -607,7 +656,6 @@ local cheats_tab = main:create_tab("Cheats", "rbxassetid://126017907477623")
 local cosmetics_tab = main:create_tab("Cosmetics", "rbxassetid://76499042599127")
 local debug_tab = main:create_tab("Debug", "rbxassetid://126017907477623")
 local skin_changer_tab = main:create_tab("Skin Changer", "rbxassetid://76499042599127") -- You can choose a different asset ID for the icon
-local avatar_tab = main:create_tab("Avatar", "rbxassetid://126017907477623") -- New tab for Avatar Changer
 
 -- Blatant Modules
 local auto_parry_module = blatant_tab:create_module({
@@ -632,7 +680,6 @@ local auto_parry_module = blatant_tab:create_module({
                     local One_Target = One_Ball:GetAttribute('target')
                     local Velocity = Zoomies.VectorVelocity
                     local Distance = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Magnitude
-                    -- Fix: Changed :GetValue() to .Value
                     local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value / 10
                     local Ping_Threshold = math.clamp(Ping / 10, 5, 17)
                     local Speed = Velocity.Magnitude
@@ -801,7 +848,6 @@ local auto_spam_parry_module = blatant_tab:create_module({
                 local Zoomies = Ball:FindFirstChild('zoomies')
                 if not Zoomies then return end
                 Auto_Parry.Closest_Player()
-                -- Fix: Changed :GetValue() to .Value
                 local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value
                 local Ping_Threshold = math.clamp(Ping / 10, 1, 16)
                 local Ball_Target = Ball:GetAttribute('target')
@@ -828,7 +874,8 @@ local auto_spam_parry_module = blatant_tab:create_module({
                 local threshold = ParryThreshold
                 if Distance <= adjustedSpamAccuracy and (Parries > threshold or recentChanges >= 3) then -- Spam if recent target changes detected
                     if getgenv().SpamParryKeypress then
-                        VirtualInputManager:SendKeyEvent(true, nil, false, game)
+                        -- This was sending nil, which won't trigger a keypress. Changed to F.
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
                     else
                         Auto_Parry.Parry(Selected_Parry_Type)
                     end
@@ -876,7 +923,6 @@ if not isMobile then
                     local Zoomies = Ball:FindFirstChild('zoomies')
                     if not Zoomies then return end
                     Auto_Parry.Closest_Player()
-                    -- Fix: Changed :GetValue() to .Value
                     local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value
                     local Ping_Threshold = math.clamp(Ping / 10, 10, 16)
                     local Ball_Target = Ball:GetAttribute('target')
@@ -931,7 +977,7 @@ manual_spam_module:create_checkbox({
         if value then
             Connections_Manager['Auto Manual Spam'] = RunService.Heartbeat:Connect(checkAutoManualSpam)
             local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
-            if button then -- Fix: Added check for button existence
+            if button then
                 if AutoManualSpamEnabled and not ManualSpamActive then
                     button.Text = "Auto"
                     button.TextColor3 = Color3.new(0, 0, 1)
@@ -944,7 +990,7 @@ manual_spam_module:create_checkbox({
             end
             if ManualSpamActive then toggleManualSpam(false) end
             local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
-            if button then -- Fix: Added check for button existence
+            if button then
                 button.Text = "Clash Mode"
                 button.TextColor3 = Color3.new(1, 0, 0)
             end
@@ -1040,7 +1086,6 @@ local lobby_ap_module = blatant_tab:create_module({
                 local Velocity = Zoomies.VectorVelocity
                 local Distance = LocalPlayer:DistanceFromCharacter(Ball.Position)
                 local Speed = Velocity.Magnitude
-                -- Fix: Changed :GetValue() to .Value
                 local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value / 10
                 local LobbyAPcappedSpeedDiff = math.min(math.max(Speed - 9.5, 0), 650)
                 local LobbyAPspeed_divisor_base = 2.4 + LobbyAPcappedSpeedDiff * 0.002
@@ -1110,7 +1155,7 @@ local speed_module = player_tab:create_module({
         else
             local character = LocalPlayer.Character
             if character and character:FindFirstChild("Humanoid") then
-                character.Humanoid.WalkSpeed = 36
+                character.Humanoid.WalkSpeed = 16 -- Set to default Roblox walkspeed, not 36
             end
             if Connections_Manager['Strafe'] then
                 Connections_Manager['Strafe']:Disconnect()
@@ -1124,11 +1169,54 @@ speed_module:create_slider({
     title = "Speed",
     flag = "Speed_Value",
     maximum_value = 200,
-    minimum_value = 36,
-    value = 36,
+    minimum_value = 16, -- Default walkspeed
+    value = 16,
     round_number = true,
     callback = function(value)
         StrafeSpeed = value
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = value
+        end
+    end
+})
+
+local jump_power_module = player_tab:create_module({
+    title = "Jump Power",
+    flag = "Jump_Power",
+    description = "Modifies player jump power",
+    section = "left",
+    callback = function(value)
+        if value then
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                LocalPlayer.Character.Humanoid.JumpPower = getgenv().JumpPower
+            end
+            Connections_Manager['Jump Power'] = LocalPlayer.CharacterAdded:Connect(function(char)
+                char:WaitForChild("Humanoid").JumpPower = getgenv().JumpPower
+            end)
+        else
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                LocalPlayer.Character.Humanoid.JumpPower = 50 -- Default jump power
+            end
+            if Connections_Manager['Jump Power'] then
+                Connections_Manager['Jump Power']:Disconnect()
+                Connections_Manager['Jump Power'] = nil
+            end
+        end
+    end
+})
+
+jump_power_module:create_slider({
+    title = "Jump Power",
+    flag = "Jump_Power_Value",
+    maximum_value = 500,
+    minimum_value = 50,
+    value = 50,
+    round_number = true,
+    callback = function(value)
+        getgenv().JumpPower = value
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = value
+        end
     end
 })
 
@@ -1162,6 +1250,7 @@ local spinbot_module = player_tab:create_module({
         else
             getgenv().spin = false
             if getgenv().spinThread then
+                coroutine.yield(getgenv().spinThread) -- Yield the coroutine instead of nil-ing it directly
                 getgenv().spinThread = nil
             end
         end
@@ -1223,8 +1312,6 @@ fov_module:create_slider({
     end
 })
 
--- New Modules for Additional Tabs
-
 -- Combat Tab
 local hitbox_expander_module = combat_tab:create_module({
     title = "Hitbox Expander",
@@ -1249,7 +1336,7 @@ local hitbox_expander_module = combat_tab:create_module({
                 for _, player in pairs(Players:GetPlayers()) do
                     if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                         local hrp = player.Character.HumanoidRootPart
-                        hrp.Size = Vector3.new(5, 5, 5) -- Reset to default
+                        hrp.Size = Vector3.new(5, 5, 5) -- Reset to default (assuming default is 5x5x5 for HRP)
                         hrp.Transparency = 0
                     end
                 end
@@ -1291,6 +1378,46 @@ local esp_module = visuals_tab:create_module({
     end
 })
 
+local visual_fx_module = visuals_tab:create_module({
+    title = "Visual Effects",
+    flag = "Visual_Effects",
+    description = "Toggle various visual effects",
+    section = "right",
+    callback = function(value) end
+})
+
+visual_fx_module:create_checkbox({
+    title = "No Head bob",
+    flag = "No_Head_Bob",
+    callback = function(value)
+        if value then
+            if not headLoop then
+                headLoop = RunService.RenderStepped:Connect(function()
+                    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                        local head = LocalPlayer.Character:FindFirstChild("Head")
+                        if head then
+                            head.CFrame = LocalPlayer.Character.HumanoidRootPart.CFrame
+                        end
+                    end
+                end)
+            end
+        else
+            if headLoop then
+                headLoop:Disconnect()
+                headLoop = nil
+            end
+        end
+    end
+})
+
+visual_fx_module:create_checkbox({
+    title = "Hit Sound",
+    flag = "Hit_Sound",
+    callback = function(value)
+        hit_Sound_Enabled = value
+    end
+})
+
 -- World Tab
 local fps_booster_module = world_tab:create_module({
     title = "FPS Booster",
@@ -1316,25 +1443,82 @@ local fps_booster_module = world_tab:create_module({
     end
 })
 
-local gravity_changer_module = environment_tab:create_module({ -- Changed to environment_tab as it's more fitting
-    title = "Gravity Changer",
-    flag = "Gravity_Changer",
-    description = "Changes the world's gravity",
-    section = "left",
+-- Music ID Changer
+local music_changer_module = world_tab:create_module({
+    title = "Music Player",
+    flag = "Music_Player",
+    description = "Play custom music via Asset ID",
+    section = "right",
     callback = function(value) end
 })
 
-gravity_changer_module:create_slider({
-    title = "Gravity",
-    flag = "Gravity_Value",
-    maximum_value = 1000,
-    minimum_value = 0,
-    value = Workspace.Gravity, -- Default to current gravity
-    round_number = true,
-    callback = function(value)
-        Workspace.Gravity = value
+local musicIDTextbox = nil
+music_changer_module:create_textbox({
+    title = "Music Asset ID",
+    flag = "Music_Asset_ID_Input",
+    text = "0", -- Placeholder for asset ID
+    callback = function(text)
+        getgenv().CurrentMusicId = text
+    end,
+    reference = function(textbox)
+        musicIDTextbox = textbox
     end
 })
+
+music_changer_module:create_button({
+    title = "Play Music",
+    flag = "Play_Music_Button",
+    callback = function()
+        local musicId = tonumber(musicIDTextbox and musicIDTextbox.text)
+        if not musicId or musicId == 0 then
+            warn("Please enter a valid Music Asset ID.")
+            return
+        end
+
+        if getgenv().MusicPlayer then
+            getgenv().MusicPlayer:Stop()
+            getgenv().MusicPlayer:Destroy()
+            getgenv().MusicPlayer = nil
+        end
+
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://" .. musicId
+        sound.Parent = Workspace
+        sound.Looped = true
+        sound.Volume = 0.5 -- Default volume
+        sound:Play()
+        getgenv().MusicPlayer = sound
+        warn("Playing music: " .. tostring(musicId))
+    end
+})
+
+music_changer_module:create_slider({
+    title = "Volume",
+    flag = "Music_Volume",
+    maximum_value = 1,
+    minimum_value = 0,
+    value = 0.5,
+    round_number = false,
+    callback = function(value)
+        if getgenv().MusicPlayer then
+            getgenv().MusicPlayer.Volume = value
+        end
+    end
+})
+
+music_changer_module:create_button({
+    title = "Stop Music",
+    flag = "Stop_Music_Button",
+    callback = function()
+        if getgenv().MusicPlayer then
+            getgenv().MusicPlayer:Stop()
+            getgenv().MusicPlayer:Destroy()
+            getgenv().MusicPlayer = nil
+            warn("Music stopped.")
+        end
+    end
+})
+
 
 -- Movement Tab
 local fly_module = movement_tab:create_module({
@@ -1357,7 +1541,7 @@ local fly_module = movement_tab:create_module({
                 Connections_Manager['Fly']:Disconnect()
                 Connections_Manager['Fly'] = nil
                 local bv = LocalPlayer.Character.HumanoidRootPart:FindFirstChild("BodyVelocity")
-                if bv then bv:Destroy() end -- Ensure it exists before destroying
+                if bv then bv:Destroy() end
             end
         end
     end
@@ -1388,38 +1572,17 @@ local ball_magnet_module = exploits_tab:create_module({
     end
 })
 
-local auto_farm_module = exploits_tab:create_module({ -- Added Auto Farm here
-    title = "Auto Farm",
+local auto_farm_module = exploits_tab:create_module({
+    title = "Auto Farm (Orbit)",
     flag = "Auto_Farm",
-    description = "Automatically orbits around the ball for farming",
+    description = "Automatically orbits the ball for farming",
     section = "right",
     callback = function(value)
-        if value then
-            Connections_Manager['Auto Farm'] = RunService.Heartbeat:Connect(function()
-                local ball = Auto_Parry.Get_Ball()
-                if ball and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                    local hrp = LocalPlayer.Character.HumanoidRootPart
-                    local currentOrbitSpeed = getgenv().OrbitSpeed or 10
-                    local currentOrbitHeight = getgenv().OrbitHeight or 5
-                    local currentOrbitDistance = getgenv().OrbitDistance or 10
-
-                    local angle = tick() * currentOrbitSpeed
-                    local xOffset = math.cos(angle) * currentOrbitDistance
-                    local zOffset = math.sin(angle) * currentOrbitDistance
-                    local targetPosition = ball.Position + Vector3.new(xOffset, currentOrbitHeight, zOffset)
-
-                    -- Move the character to the target position
-                    LocalPlayer.Character.Humanoid:MoveTo(targetPosition)
-                end
-            end)
-        else
-            if Connections_Manager['Auto Farm'] then
-                Connections_Manager['Auto Farm']:Disconnect()
-                Connections_Manager['Auto Farm'] = nil
-                -- Optionally stop movement when disabled
-                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                    LocalPlayer.Character.Humanoid:MoveTo(LocalPlayer.Character.HumanoidRootPart.Position)
-                end
+        getgenv().AutoFarmEnabled = value
+        if not value then
+            if getgenv().AutoFarmBodyVelocity then
+                getgenv().AutoFarmBodyVelocity:Destroy()
+                getgenv().AutoFarmBodyVelocity = nil
             end
         end
     end
@@ -1428,9 +1591,9 @@ local auto_farm_module = exploits_tab:create_module({ -- Added Auto Farm here
 auto_farm_module:create_slider({
     title = "Orbit Speed",
     flag = "Orbit_Speed",
-    maximum_value = 50,
-    minimum_value = 1,
-    value = 10,
+    maximum_value = 100,
+    minimum_value = 10,
+    value = 20,
     round_number = true,
     callback = function(value)
         getgenv().OrbitSpeed = value
@@ -1441,7 +1604,7 @@ auto_farm_module:create_slider({
     title = "Orbit Height",
     flag = "Orbit_Height",
     maximum_value = 50,
-    minimum_value = 1,
+    minimum_value = -10,
     value = 5,
     round_number = true,
     callback = function(value)
@@ -1453,7 +1616,7 @@ auto_farm_module:create_slider({
     title = "Orbit Distance",
     flag = "Orbit_Distance",
     maximum_value = 50,
-    minimum_value = 1,
+    minimum_value = 5,
     value = 10,
     round_number = true,
     callback = function(value)
@@ -1469,7 +1632,7 @@ local spectate_module = utilities_tab:create_module({
     section = "left",
     callback = function(value)
         if value then
-            -- Implemented in dropdown callback
+            -- Logic handled by dropdown
         else
             Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
             Workspace.CurrentCamera.CameraSubject = LocalPlayer.Character.Humanoid
@@ -1500,63 +1663,6 @@ spectate_module:create_dropdown({
     end
 })
 
-local music_player_module = utilities_tab:create_module({
-    title = "Music Player",
-    flag = "Music_Player",
-    description = "Plays music from a Roblox Asset ID",
-    section = "right",
-    callback = function(value) end
-})
-
-local musicIdTextbox = nil
-
-music_player_module:create_textbox({
-    title = "Music Asset ID",
-    flag = "Music_ID_Input",
-    text = "rbxassetid://585489811", -- Example: Elevator music
-    callback = function(text)
-        -- No direct action, applied via button
-    end,
-    reference = function(textbox)
-        musicIdTextbox = textbox
-    end
-})
-
-music_player_module:create_checkbox({
-    title = "Play Music",
-    flag = "Play_Music_Button",
-    callback = function()
-        local musicId = musicIdTextbox and musicIdTextbox.text or ""
-        if musicId ~= "" then
-            if currentMusicSound then
-                currentMusicSound:Stop()
-                currentMusicSound:Destroy()
-            end
-            currentMusicSound = Instance.new("Sound")
-            currentMusicSound.SoundId = musicId
-            currentMusicSound.Parent = Workspace
-            currentMusicSound.Looped = true
-            currentMusicSound:Play()
-            warn("Playing music: " .. musicId)
-        else
-            warn("Please enter a Music Asset ID.")
-        end
-    end
-})
-
-music_player_module:create_checkbox({
-    title = "Stop Music",
-    flag = "Stop_Music_Button",
-    callback = function()
-        if currentMusicSound then
-            currentMusicSound:Stop()
-            currentMusicSound:Destroy()
-            currentMusicSound = nil
-            warn("Music stopped.")
-        end
-    end
-})
-
 -- Environment Tab
 local time_changer_module = environment_tab:create_module({
     title = "Time Changer",
@@ -1573,13 +1679,49 @@ local timeOptions = {
 }
 
 time_changer_module:create_dropdown({
-    title = "Time",
-    flag = "Time",
+    title = "Preset Times",
+    flag = "Preset_Time",
     options = {"Day", "Night", "Evening"},
     multi_dropdown = false,
     maximum_options = 1,
     callback = function(value)
         Lighting.TimeOfDay = timeOptions[value]
+    end
+})
+
+local more_time_changer_module = environment_tab:create_module({
+    title = "Custom Time",
+    flag = "Custom_Time",
+    description = "Set specific time of day",
+    section = "left",
+    callback = function(value) end
+})
+
+more_time_changer_module:create_slider({
+    title = "Hour",
+    flag = "Time_Hour",
+    maximum_value = 23,
+    minimum_value = 0,
+    value = 14,
+    round_number = true,
+    callback = function(value)
+        -- Ensure minute is preserved or defaults to 0
+        local currentMinute = tonumber(string.sub(Lighting.TimeOfDay, 4, 5)) or 0
+        Lighting.TimeOfDay = string.format("%02d:%02d:00", value, currentMinute)
+    end
+})
+
+more_time_changer_module:create_slider({
+    title = "Minute",
+    flag = "Time_Minute",
+    maximum_value = 59,
+    minimum_value = 0,
+    value = 0,
+    round_number = true,
+    callback = function(value)
+        -- Ensure hour is preserved
+        local currentHour = math.floor(Lighting.ClockTime)
+        Lighting.TimeOfDay = string.format("%02d:%02d:00", currentHour, value)
     end
 })
 
@@ -1599,7 +1741,8 @@ ambient_changer_module:create_slider({
     value = 128,
     round_number = true,
     callback = function(value)
-        Lighting.Ambient = Color3.fromRGB(value, Lighting.Ambient.G * 255, Lighting.Ambient.B * 255)
+        getgenv().CurrentAmbientR = value
+        Lighting.Ambient = Color3.fromRGB(getgenv().CurrentAmbientR, getgenv().CurrentAmbientG, getgenv().CurrentAmbientB)
     end
 })
 
@@ -1611,7 +1754,8 @@ ambient_changer_module:create_slider({
     value = 128,
     round_number = true,
     callback = function(value)
-        Lighting.Ambient = Color3.fromRGB(Lighting.Ambient.R * 255, value, Lighting.Ambient.B * 255)
+        getgenv().CurrentAmbientG = value
+        Lighting.Ambient = Color3.fromRGB(getgenv().CurrentAmbientR, getgenv().CurrentAmbientG, getgenv().CurrentAmbientB)
     end
 })
 
@@ -1623,7 +1767,8 @@ ambient_changer_module:create_slider({
     value = 128,
     round_number = true,
     callback = function(value)
-        Lighting.Ambient = Color3.fromRGB(Lighting.Ambient.R * 255, Lighting.Ambient.G * 255, value)
+        getgenv().CurrentAmbientB = value
+        Lighting.Ambient = Color3.fromRGB(getgenv().CurrentAmbientR, getgenv().CurrentAmbientG, getgenv().CurrentAmbientB)
     end
 })
 
@@ -1642,7 +1787,7 @@ local no_fog_module = cheats_tab:create_module({
     end
 })
 
--- Cosmetics Tab (Modified to remove Headless)
+-- Cosmetics Tab
 local cosmetics_module = cosmetics_tab:create_module({
     title = "Korblox Legs",
     flag = "Korblox_Legs",
@@ -1666,29 +1811,21 @@ local cosmetics_module = cosmetics_tab:create_module({
                 local rightLeg = char:FindFirstChild("RightLeg") or char:FindFirstChild("Right Leg")
                 if rightLeg then
                     local originalMesh = rightLeg:FindFirstChildOfClass("SpecialMesh")
+                    _G.PlayerCosmeticsCleanup = _G.PlayerCosmeticsCleanup or {}
+                    _G.PlayerCosmeticsCleanup.rightLegChildren = {} -- Clear previous children data
+
                     if originalMesh then
-                        _G.PlayerCosmeticsCleanup = _G.PlayerCosmeticsCleanup or {}
-                        _G.PlayerCosmeticsCleanup.originalMeshId = originalMesh.MeshId
-                        _G.PlayerCosmeticsCleanup.originalTextureId = originalMesh.TextureId
-                        _G.PlayerCosmeticsCleanup.originalScale = originalMesh.Scale
                         _G.PlayerCosmeticsCleanup.hadNoMesh = false
+                        table.insert(_G.PlayerCosmeticsCleanup.rightLegChildren, {
+                            ClassName = originalMesh.ClassName,
+                            Properties = {
+                                MeshId = originalMesh.MeshId,
+                                TextureId = originalMesh.TextureId,
+                                Scale = originalMesh.Scale
+                            }
+                        })
                     else
-                        _G.PlayerCosmeticsCleanup = _G.PlayerCosmeticsCleanup or {}
                         _G.PlayerCosmeticsCleanup.hadNoMesh = true
-                    end
-                    -- Ensure rightLegChildren is reset or initialized to avoid carrying over old data
-                    _G.PlayerCosmeticsCleanup.rightLegChildren = {}
-                    for _, child in pairs(rightLeg:GetChildren()) do
-                        if child:IsA("SpecialMesh") then
-                            table.insert(_G.PlayerCosmeticsCleanup.rightLegChildren, {
-                                ClassName = child.ClassName,
-                                Properties = {
-                                    MeshId = child.MeshId,
-                                    TextureId = child.TextureId,
-                                    Scale = child.Scale
-                                }
-                            })
-                        end
                     end
                 end
             end
@@ -1733,62 +1870,159 @@ local cosmetics_module = cosmetics_tab:create_module({
             if LocalPlayer.Character then
                 restoreRightLeg(LocalPlayer.Character)
             end
-            _G.PlayerCosmeticsCleanup = {}
+            _G.PlayerCosmeticsCleanup = {} -- Reset cleanup data
         end
     end
 })
 
--- Avatar Tab
-local head_mesh_module = avatar_tab:create_module({
-    title = "Head Mesh Changer",
-    flag = "Head_Mesh_Changer",
-    description = "Changes your head mesh to a specified ID",
-    section = "left",
+
+-- Avatar Changer (Client-Side Visuals)
+local avatar_changer_module = cosmetics_tab:create_module({
+    title = "Avatar Changer",
+    flag = "Avatar_Changer",
+    description = "Change client-side avatar visuals",
+    section = "right",
     callback = function(value) end
 })
 
-local headMeshIdTextbox = nil
-
-head_mesh_module:create_textbox({
-    title = "Head Mesh ID",
-    flag = "Head_Mesh_ID_Input",
-    text = "rbxassetid://104992982", -- Default to blocky head
-    callback = function(text)
-        -- No direct action, applied via button
-    end,
+local avatarAssetTextbox = nil
+avatar_changer_module:create_textbox({
+    title = "Asset ID (Body Part/Accessory)",
+    flag = "Avatar_Asset_ID_Input",
+    text = "0", -- Placeholder for asset ID
+    callback = function(text) end,
     reference = function(textbox)
-        headMeshIdTextbox = textbox
+        avatarAssetTextbox = textbox
     end
 })
 
-head_mesh_module:create_checkbox({
-    title = "Apply Head Mesh",
-    flag = "Apply_Head_Mesh_Button",
+avatar_changer_module:create_dropdown({
+    title = "Part Type",
+    flag = "Avatar_Part_Type",
+    options = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg", "Accessory"},
+    multi_dropdown = false,
+    maximum_options = 1,
+    callback = function(value)
+        avatar_changer_module.SelectedPartType = value
+    end,
+    default_value = "Head"
+})
+
+avatar_changer_module:create_button({
+    title = "Apply Avatar Change",
+    flag = "Apply_Avatar_Change_Button",
     callback = function()
-        local meshId = headMeshIdTextbox and headMeshIdTextbox.text or ""
-        if meshId ~= "" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
-            local head = LocalPlayer.Character.Head
-            local mesh = head:FindFirstChildOfClass("SpecialMesh") or Instance.new("SpecialMesh")
-            mesh.MeshId = meshId
-            mesh.Parent = head
-            warn("Applied head mesh: " .. meshId)
+        local assetId = tonumber(avatarAssetTextbox and avatarAssetTextbox.text)
+        local partType = avatar_changer_module.SelectedPartType
+
+        if not assetId or assetId == 0 then
+            warn("Please enter a valid Asset ID.")
+            return
+        end
+        if not partType then
+            warn("Please select a Part Type.")
+            return
+        end
+
+        local char = LocalPlayer.Character
+        if not char then warn("Character not found.") return end
+
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then warn("Humanoid not found.") return end
+
+        if partType == "Accessory" then
+            local success, newAcc = pcall(function()
+                return InsertService:LoadAsset(assetId):GetChildren()[1]
+            end)
+            if success and newAcc and newAcc:IsA("Accessory") then
+                humanoid:AddAccessory(newAcc)
+                warn("Applied accessory: " .. tostring(assetId))
+            else
+                warn("Failed to load or apply accessory from ID: " .. tostring(assetId))
+            end
         else
-            warn("Invalid Head Mesh ID or character not found.")
+            local bodyPartName = partType:gsub(" ", "") -- "Left Arm" -> "LeftArm"
+            local bodyPart = char:FindFirstChild(bodyPartName)
+            if not bodyPart and partType == "Torso" then bodyPart = char:FindFirstChild("UpperTorso") or char:FindFirstChild("LowerTorso") end -- For R15
+            if not bodyPart then warn("Could not find part: " .. partType) return end
+
+            local success, newModel = pcall(function()
+                return InsertService:LoadAsset(assetId)
+            end)
+
+            if success and newModel and newModel:IsA("Model") then
+                local newPart = newModel:FindFirstChildOfClass("Part") or newModel:FindFirstChildOfClass("MeshPart")
+                if newPart then
+                    -- Save original properties for potential restore (simple, not comprehensive)
+                    local originalPart = bodyPart:Clone()
+                    originalPart.Parent = nil -- Parent to nil to hold it
+                    _G.OriginalBodyParts = _G.OriginalBodyParts or {}
+                    _G.OriginalBodyParts[bodyPart.Name] = originalPart
+
+                    newPart.CFrame = bodyPart.CFrame
+                    newPart.Parent = char
+                    newPart.Name = bodyPart.Name -- Keep original name
+                    newPart.Material = bodyPart.Material -- Transfer some properties
+                    newPart.Color = bodyPart.Color
+
+                    -- Transfer welds/motors if possible (very complex, basic attempt)
+                    for _, attachment in pairs(bodyPart:GetChildren()) do
+                        if attachment:IsA("Attachment") then
+                            attachment:Clone().Parent = newPart
+                        end
+                    end
+                    -- This part is highly dependent on how the game rigs its characters.
+                    -- Simple replacement often breaks R15 animations.
+                    humanoid:RemoveBodyPart(bodyPart)
+                    bodyPart:Destroy()
+                    humanoid:AddBodyPart(newPart) -- Re-add to humanoid
+
+                    warn("Applied " .. partType .. " from ID: " .. tostring(assetId))
+                else
+                    warn("Loaded asset is not a valid body part: " .. tostring(assetId))
+                end
+            else
+                warn("Failed to load body part asset from ID: " .. tostring(assetId))
+            end
         end
     end
 })
 
-head_mesh_module:create_checkbox({
-    title = "Reset Head Mesh",
-    flag = "Reset_Head_Mesh_Button",
+avatar_changer_module:create_button({
+    title = "Reset Avatar Part",
+    flag = "Reset_Avatar_Part_Button",
     callback = function()
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
-            local head = LocalPlayer.Character.Head
-            local mesh = head:FindFirstChildOfClass("SpecialMesh")
-            if mesh then
-                mesh:Destroy()
+        local partType = avatar_changer_module.SelectedPartType
+        local char = LocalPlayer.Character
+        if not char then warn("Character not found.") return end
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then warn("Humanoid not found.") return end
+
+        if partType == "Accessory" then
+            -- Cannot easily "reset" an accessory without knowing which one was added.
+            -- Best to just remove all custom accessories or reset character.
+            for _, acc in pairs(humanoid:GetAccessories()) do
+                -- If you need to remove specific ones, check acc.Handle.MeshId etc.
+                -- For now, a general remove will do if only one is expected.
+                acc:Destroy()
             end
-            warn("Reset head mesh.")
+            warn("Removed accessories.")
+        else
+            local bodyPartName = partType:gsub(" ", "")
+            local currentPart = char:FindFirstChild(bodyPartName)
+            if not currentPart and partType == "Torso" then currentPart = char:FindFirstChild("UpperTorso") or char:FindFirstChild("LowerTorso") end
+
+            if currentPart and _G.OriginalBodyParts and _G.OriginalBodyParts[currentPart.Name] then
+                local originalPart = _G.OriginalBodyParts[currentPart.Name]:Clone()
+                originalPart.Parent = char
+                originalPart.CFrame = currentPart.CFrame -- Maintain position
+                humanoid:RemoveBodyPart(currentPart)
+                currentPart:Destroy()
+                humanoid:AddBodyPart(originalPart)
+                warn("Restored " .. partType .. ".")
+            else
+                warn("Could not reset " .. partType .. ". Original not saved or part not found.")
+            end
         end
     end
 })
@@ -1810,7 +2044,6 @@ local ping_display_module = debug_tab:create_module({
             label.TextColor3 = Color3.new(1, 1, 1)
             label.TextScaled = true
             Connections_Manager['Ping Display'] = RunService.RenderStepped:Connect(function()
-                -- Fix: Changed :GetValue() to .Value
                 label.Text = "Ping: " .. math.floor(Stats.Network.ServerStatsItem['Data Ping'].Value) .. "ms"
             end)
         else
@@ -1853,53 +2086,45 @@ skin_changer_module:create_textbox({
     end
 })
 
-skin_changer_module:create_checkbox({
+skin_changer_module:create_button({ -- Changed from checkbox to button for clearer intent
     title = "Load Sword",
     flag = "Load_Sword_Button",
     callback = function()
         local swordName = currentSwordTextbox and currentSwordTextbox.text or ""
         if swordName ~= "" then
-            print("[DEBUG] Attempting to load sword from textbox: " .. swordName) -- DEBUG
-            getgenv().config.enabled = true
+            print("[DEBUG] Attempting to load sword from textbox: " .. swordName)
+            getgenv().config.enabled = true -- Enable the skin changer
             getgenv().config.model = swordName
             getgenv().config.anim = swordName
             getgenv().config.fx = swordName
-            getgenv().updateSword() -- FIXED: Added this line to trigger the sword update
-            warn("Attempting to load sword: " .. swordName) -- Original warn
+            getgenv().updateSword() -- Call the update function
+            warn("Attempting to load custom sword: " .. swordName)
         else
             warn("Please enter a sword name into the textbox.")
         end
     end
 })
 
-skin_changer_module:create_checkbox({
-    title = "Refresh Sword",
-    flag = "Refresh_Sword_Button",
+skin_changer_module:create_button({ -- Changed from checkbox to button
+    title = "Restore Original Sword",
+    flag = "Restore_Sword_Button",
     callback = function()
-        print("[DEBUG] Refreshing sword triggered.") -- DEBUG
-        getgenv().config.enabled = false -- Temporarily disable to force re-equip original
-        local currentEquippedSword = LocalPlayer:GetAttribute("CurrentlyEquippedSword") -- Use LocalPlayer directly for attribute
-        if currentEquippedSword then
-            print("[DEBUG] Currently equipped sword found: " .. currentEquippedSword) -- DEBUG
-            getgenv().config.model = currentEquippedSword
-            getgenv().config.anim = currentEquippedSword
-            getgenv().config.fx = currentEquippedSword
-            getgenv().updateSword()
-            warn("Refreshing sword to: " .. currentEquippedSword) -- Original warn
-        else
-            warn("Could not determine currently equipped sword to refresh.")
-        end
+        print("[DEBUG] Restoring original sword triggered.")
+        getgenv().config.enabled = false -- Disable the skin changer, which will trigger restore logic
+        getgenv().updateSword() -- Call update to execute the disabled logic
+        warn("Restoring original sword.")
     end
 })
 
--- Existing skin changer code (modified to integrate with UI)
+-- Existing skin changer code (modified to integrate with UI and improve logic)
 getgenv().config = getgenv().config or {
     enabled = false,
     model = "Flowing Katana", -- Default value for initial load
     anim = "Flowing Katana",
-    fx = "Flowing Katana"
+    fx = "Flowing Katana",
+    originalEquippedSword = nil -- To store the truly original sword
 }
--- print = function(...) end -- REMOVE OR COMMENT THIS LINE TEMPORARILY TO SEE DEBUG PRINTS
+
 local p = game:GetService("Players").LocalPlayer
 local rs = game:GetService("ReplicatedStorage")
 local swords = require(rs:WaitForChild("Shared", 9e9):WaitForChild("ReplicatedInstances", 9e9):WaitForChild("Swords", 9e9))
@@ -1907,42 +2132,81 @@ local ctrl, playFx, lastParry = nil, nil, 0
 
 local function getSlash(name)
     local s = swords:GetSword(name)
-    print("[DEBUG] getSlash called for:", name, " - Result:", s and s.SlashName or "nil") -- DEBUG
+    print("[DEBUG] getSlash called for:", name, " - Result:", s and s.SlashName or "nil")
     return (s and s.SlashName) or "SlashEffect"
 end
-getgenv().config.slash = getSlash(getgenv().config.fx)
+
+-- Function to save the currently equipped sword for restoration
+local function saveOriginalSword()
+    if not getgenv().config.originalEquippedSword then
+        getgenv().config.originalEquippedSword = p:GetAttribute("CurrentlyEquippedSword")
+        print("[DEBUG] Saved original equipped sword:", getgenv().config.originalEquippedSword)
+    end
+end
+
+-- Ensure original sword is saved as soon as character is available
+p.CharacterAdded:Connect(function(char)
+    char:WaitForChild("HumanoidRootPart")
+    saveOriginalSword()
+end)
+if p.Character then -- If character already exists on script load
+    p.Character:WaitForChild("HumanoidRootPart")
+    saveOriginalSword()
+end
 
 local function setSword()
-    print("[DEBUG] setSword called. getgenv().config.enabled:", getgenv().config.enabled) -- DEBUG
+    print("[DEBUG] setSword called. getgenv().config.enabled:", getgenv().config.enabled)
+    local char = p.Character
+    if not char then return end
+
     if not getgenv().config.enabled then
-        -- If disabled, try to re-equip the player's original sword
-        local currentEquippedSword = p:GetAttribute("CurrentlyEquippedSword")
-        print("[DEBUG] Skin changer disabled. Attempting to re-equip original:", currentEquippedSword) -- DEBUG
-        if currentEquippedSword then
-            setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
-            swords:EquipSwordTo(p.Character, currentEquippedSword)
-            -- Attempt to reset anim/fx if possible, or just use defaults
-            local swordData = swords:GetSword(currentEquippedSword)
-            if swordData then
-                print("[DEBUG] Re-equipping original sword anim/fx:", swordData.AnimationType, swordData.Name) -- DEBUG
-                if ctrl then ctrl:SetSword(swordData.AnimationType) end
+        -- If disabled, try to re-equip the player's truly original sword
+        local originalSword = getgenv().config.originalEquippedSword
+        print("[DEBUG] Skin changer disabled. Attempting to re-equip original:", originalSword)
+        if originalSword then
+            -- Attempt to force equip the original sword via the game's actual remote
+            -- **THIS PART IS GAME-SPECIFIC AND WILL LIKELY NEED REFINEMENT**
+            -- rs.Remotes.EquipSword:FireServer(originalSword) -- Placeholder, find actual remote for your game
+
+            -- Use the game's internal equip function if hooked/unhooked
+            if rawget(swords, "EquipSwordTo") then
+                setupvalue(rawget(swords, "EquipSwordTo"), 2, true) -- Re-enable original behavior
+                swords:EquipSwordTo(char, originalSword)
+                -- Optionally, re-disable after the call if you want to maintain your hook
+                -- setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
+            end
+
+            -- Update client-side visuals via ctrl
+            local swordData = swords:GetSword(originalSword)
+            if ctrl and swordData then
+                print("[DEBUG] Setting anim/fx for original sword:", swordData.AnimationType, swordData.Name)
+                ctrl:SetSword(swordData.AnimationType)
                 getgenv().config.slash = getSlash(swordData.Name)
             else
-                print("[DEBUG] Could not find sword data for original sword. Falling back to Flowing Katana.") -- DEBUG
-                if ctrl then ctrl:SetSword("Flowing Katana") end -- Fallback if data not found
+                print("[DEBUG] Could not find sword data for original sword or ctrl. Falling back to Flowing Katana for visuals.")
+                if ctrl then ctrl:SetSword("Flowing Katana") end -- Fallback for visual
                 getgenv().config.slash = getSlash("Flowing Katana")
             end
         end
         return
     end
-    print("[DEBUG] Skin changer enabled. Attempting to equip custom sword:", getgenv().config.model) -- DEBUG
-    setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
-    swords:EquipSwordTo(p.Character, getgenv().config.model)
+
+    print("[DEBUG] Skin changer enabled. Attempting to equip custom sword:", getgenv().config.model)
+    -- Attempt to force equip the custom sword via the game's actual remote
+    -- **THIS PART IS GAME-SPECIFIC AND WILL LIKELY NEED REFINEMENT**
+    -- rs.Remotes.EquipSword:FireServer(getgenv().config.model) -- Placeholder, find actual remote for your game
+
+    -- Use the game's internal equip function if hooked
+    if rawget(swords, "EquipSwordTo") then
+        setupvalue(rawget(swords, "EquipSwordTo"), 2, false) -- Ensure it's hooked/disabled for our custom model
+        swords:EquipSwordTo(char, getgenv().config.model)
+    end
+
     if ctrl then ctrl:SetSword(getgenv().config.anim) end
 end
 
 getgenv().updateSword = function()
-    print("[DEBUG] updateSword called.") -- DEBUG
+    print("[DEBUG] updateSword called.")
     getgenv().config.slash = getSlash(getgenv().config.fx)
     setSword()
 end
@@ -1953,7 +2217,7 @@ while task.wait() and not ctrl do
             local u = getupvalues(v.Function)
             if #u == 1 and type(u[1]) == "table" then
                 ctrl = u[1]
-                print("[DEBUG] Found ctrl:", tostring(ctrl)) -- DEBUG
+                print("[DEBUG] Found ctrl:", tostring(ctrl))
                 break
             end
         end
@@ -1966,7 +2230,7 @@ while task.wait() and not parryConnA do
         if v.Function and getinfo(v.Function).name == "parrySuccessAll" then
             parryConnA, playFx = v, v.Function
             v:Disable()
-            print("[DEBUG] Found and disabled parryConnA.") -- DEBUG
+            print("[DEBUG] Found and disabled parryConnA.")
             break
         end
     end
@@ -1976,7 +2240,7 @@ while task.wait() and not parryConnB do
         if v.Function and getinfo(v.Function).name == "parrySuccessAll" then
             parryConnB = v
             v:Disable()
-            print("[DEBUG] Found and disabled parryConnB.") -- DEBUG
+            print("[DEBUG] Found and disabled parryConnB.")
             break
         end
     end
@@ -1988,7 +2252,7 @@ rs.Remotes.ParrySuccessAll.OnClientEvent:Connect(function(...)
     if tostring(a[4]) ~= p.Name then
         lastParry = tick()
     elseif getgenv().config.enabled then
-        print("[DEBUG] Applying custom slash and fx in ParrySuccessAll:", getgenv().config.slash, getgenv().config.fx) -- DEBUG
+        print("[DEBUG] Applying custom slash and fx in ParrySuccessAll:", getgenv().config.slash, getgenv().config.fx)
         a[1], a[3] = getgenv().config.slash, getgenv().config.fx
     end
     return playFx(unpack(a))
@@ -1996,40 +2260,35 @@ end)
 
 task.spawn(function()
     while task.wait(1) do
-        local c = p.Character or p.CharacterAdded:Wait()
+        local c = p.Character
+        if not c then continue end
+
+        local currentEquippedAttribute = p:GetAttribute("CurrentlyEquippedSword")
+
         if getgenv().config.enabled then
-            print("[DEBUG] Checking custom sword state. Current model:", p:GetAttribute("CurrentlyEquippedSword"), "Desired model:", getgenv().config.model) -- DEBUG
-            if p:GetAttribute("CurrentlyEquippedSword") ~= getgenv().config.model or not c:FindFirstChild(getgenv().config.model) then
-                print("[DEBUG] Custom sword not equipped or found. Re-equipping.") -- DEBUG
+            print("[DEBUG] Checking custom sword state. Current model attr:", currentEquippedAttribute, "Desired model:", getgenv().config.model)
+            if currentEquippedAttribute ~= getgenv().config.model or not c:FindFirstChild(getgenv().config.model) then
+                print("[DEBUG] Custom sword not equipped or found. Re-equipping.")
                 setSword()
             end
             for _, m in pairs(c:GetChildren()) do
-                if m:IsA("Model") and m.Name ~= getgenv().config.model and m.Name ~= "HumanoidRootPart" and m.Name ~= "Head" and m.Name ~= "Torso" and m.Name ~= "Right Arm" and m.Name ~= "Left Arm" and m.Name ~= "Right Leg" and m.Name ~= "Left Leg" then -- Exclude common character body parts
-                    print("[DEBUG] Destroying unwanted model:", m.Name) -- DEBUG
+                if m:IsA("Model") and m.Name ~= getgenv().config.model and m.Name ~= "HumanoidRootPart" and m.Name ~= "Head" and m.Name ~= "Torso" and m.Name ~= "Right Arm" and m.Name ~= "Left Arm" and m.Name ~= "Right Leg" and m.Name ~= "Left Leg" and not m:FindFirstChildOfClass("Humanoid") then -- Exclude common character body parts and potential accessories
+                    print("[DEBUG] Destroying unwanted model:", m.Name)
                     m:Destroy()
                 end
                 task.wait()
             end
         else
             -- If disabled, ensure original sword is re-equipped and other models are removed
-            local currentEquippedSword = p:GetAttribute("CurrentlyEquippedSword")
-            print("[DEBUG] Skin changer disabled. Ensuring original sword is equipped. Current:", currentEquippedSword) -- DEBUG
-            if currentEquippedSword and (p:GetAttribute("CurrentlyEquippedSword") ~= currentEquippedSword or not c:FindFirstChild(currentEquippedSword)) then
-                print("[DEBUG] Original sword not equipped or found. Re-equipping original.") -- DEBUG
-                setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
-                swords:EquipSwordTo(c, currentEquippedSword)
-                -- Attempt to set animation and effects to match the original sword
-                local swordData = swords:GetSword(currentEquippedSword)
-                if ctrl and swordData then
-                    print("[DEBUG] Setting anim/fx for original sword:", swordData.AnimationType, swordData.Name) -- DEBUG
-                    ctrl:SetSword(swordData.AnimationType)
-                    getgenv().config.slash = getSlash(swordData.Name)
-                end
+            print("[DEBUG] Skin changer disabled. Ensuring original sword is equipped. CurrentAttr:", currentEquippedAttribute, "OriginalSaved:", getgenv().config.originalEquippedSword)
+            if getgenv().config.originalEquippedSword and (currentEquippedAttribute ~= getgenv().config.originalEquippedSword or not c:FindFirstChild(getgenv().config.originalEquippedSword)) then
+                print("[DEBUG] Original sword not equipped or found. Re-equipping original.")
+                setSword() -- Call setSword which handles the disabled state and restores
             end
             for _, m in pairs(c:GetChildren()) do
                 -- Destroy any lingering custom models if skin changer is off
-                if m:IsA("Model") and m.Name ~= currentEquippedSword and m.Name ~= "HumanoidRootPart" and m.Name ~= "Head" and m.Name ~= "Torso" and m.Name ~= "Right Arm" and m.Name ~= "Left Arm" and m.Name ~= "Right Leg" and m.Name ~= "Left Leg" then -- Add other character parts to exclude from deletion
-                    print("[DEBUG] Destroying lingering custom model after disable:", m.Name) -- DEBUG
+                if m:IsA("Model") and m.Name ~= (currentEquippedAttribute or "") and m.Name ~= "HumanoidRootPart" and m.Name ~= "Head" and m.Name ~= "Torso" and m.Name ~= "Right Arm" and m.Name ~= "Left Arm" and m.Name ~= "Right Leg" and m.Name ~= "Left Leg" and not m:FindFirstChildOfClass("Humanoid") then -- Add other character parts to exclude from deletion
+                    print("[DEBUG] Destroying lingering custom model after disable:", m.Name)
                     m:Destroy()
                 end
                 task.wait()
@@ -2111,6 +2370,11 @@ end)
 
 ReplicatedStorage.Remotes.ParrySuccess.OnClientEvent:Connect(function()
     if hit_Sound_Enabled then
+        -- You need to define 'hit_Sound' as a Sound instance somewhere
+        -- Example:
+        -- local hit_Sound = Instance.new("Sound")
+        -- hit_Sound.SoundId = "rbxassetid://YOUR_HIT_SOUND_ID"
+        -- hit_Sound.Parent = game:GetService("SoundService")
         -- hit_Sound:Play()
     end
 end)
@@ -2167,7 +2431,6 @@ ReplicatedStorage.Remotes.ParrySuccessAll.OnClientEvent:Connect(function(a, b)
     local Ball_Direction = Velocity.Unit
     local Direction = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Unit
     local Dot = Direction:Dot(Ball_Direction)
-    -- Fix: Changed :GetValue() to .Value
     local Pings = Stats.Network.ServerStatsItem['Data Ping'].Value
     local Speed_Threshold = math.min(Speed / 100, 40)
     local Reach_Time = Distance / Speed - (Pings / 1000)
