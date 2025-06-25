@@ -66,6 +66,7 @@ local headLoop = nil
 local AutoManualSpamEnabled = false
 local ManualSpamActive = false
 local recentTargetChanges = {} -- New variable for tracking ball target changes
+local currentMusicSound = nil -- For Music Player
 
 -- Remote detection
 task.spawn(function()
@@ -456,7 +457,7 @@ local function GetBall()
         if Ball:FindFirstChild("ff") then return Ball end
     end
     return nil
-end
+}
 
 local function SpamInput()
     if InputTask then return end
@@ -606,6 +607,7 @@ local cheats_tab = main:create_tab("Cheats", "rbxassetid://126017907477623")
 local cosmetics_tab = main:create_tab("Cosmetics", "rbxassetid://76499042599127")
 local debug_tab = main:create_tab("Debug", "rbxassetid://126017907477623")
 local skin_changer_tab = main:create_tab("Skin Changer", "rbxassetid://76499042599127") -- You can choose a different asset ID for the icon
+local avatar_tab = main:create_tab("Avatar", "rbxassetid://126017907477623") -- New tab for Avatar Changer
 
 -- Blatant Modules
 local auto_parry_module = blatant_tab:create_module({
@@ -1314,6 +1316,26 @@ local fps_booster_module = world_tab:create_module({
     end
 })
 
+local gravity_changer_module = environment_tab:create_module({ -- Changed to environment_tab as it's more fitting
+    title = "Gravity Changer",
+    flag = "Gravity_Changer",
+    description = "Changes the world's gravity",
+    section = "left",
+    callback = function(value) end
+})
+
+gravity_changer_module:create_slider({
+    title = "Gravity",
+    flag = "Gravity_Value",
+    maximum_value = 1000,
+    minimum_value = 0,
+    value = Workspace.Gravity, -- Default to current gravity
+    round_number = true,
+    callback = function(value)
+        Workspace.Gravity = value
+    end
+})
+
 -- Movement Tab
 local fly_module = movement_tab:create_module({
     title = "Fly",
@@ -1366,6 +1388,79 @@ local ball_magnet_module = exploits_tab:create_module({
     end
 })
 
+local auto_farm_module = exploits_tab:create_module({ -- Added Auto Farm here
+    title = "Auto Farm",
+    flag = "Auto_Farm",
+    description = "Automatically orbits around the ball for farming",
+    section = "right",
+    callback = function(value)
+        if value then
+            Connections_Manager['Auto Farm'] = RunService.Heartbeat:Connect(function()
+                local ball = Auto_Parry.Get_Ball()
+                if ball and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    local hrp = LocalPlayer.Character.HumanoidRootPart
+                    local currentOrbitSpeed = getgenv().OrbitSpeed or 10
+                    local currentOrbitHeight = getgenv().OrbitHeight or 5
+                    local currentOrbitDistance = getgenv().OrbitDistance or 10
+
+                    local angle = tick() * currentOrbitSpeed
+                    local xOffset = math.cos(angle) * currentOrbitDistance
+                    local zOffset = math.sin(angle) * currentOrbitDistance
+                    local targetPosition = ball.Position + Vector3.new(xOffset, currentOrbitHeight, zOffset)
+
+                    -- Move the character to the target position
+                    LocalPlayer.Character.Humanoid:MoveTo(targetPosition)
+                end
+            end)
+        else
+            if Connections_Manager['Auto Farm'] then
+                Connections_Manager['Auto Farm']:Disconnect()
+                Connections_Manager['Auto Farm'] = nil
+                -- Optionally stop movement when disabled
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                    LocalPlayer.Character.Humanoid:MoveTo(LocalPlayer.Character.HumanoidRootPart.Position)
+                end
+            end
+        end
+    end
+})
+
+auto_farm_module:create_slider({
+    title = "Orbit Speed",
+    flag = "Orbit_Speed",
+    maximum_value = 50,
+    minimum_value = 1,
+    value = 10,
+    round_number = true,
+    callback = function(value)
+        getgenv().OrbitSpeed = value
+    end
+})
+
+auto_farm_module:create_slider({
+    title = "Orbit Height",
+    flag = "Orbit_Height",
+    maximum_value = 50,
+    minimum_value = 1,
+    value = 5,
+    round_number = true,
+    callback = function(value)
+        getgenv().OrbitHeight = value
+    end
+})
+
+auto_farm_module:create_slider({
+    title = "Orbit Distance",
+    flag = "Orbit_Distance",
+    maximum_value = 50,
+    minimum_value = 1,
+    value = 10,
+    round_number = true,
+    callback = function(value)
+        getgenv().OrbitDistance = value
+    end
+})
+
 -- Utilities Tab
 local spectate_module = utilities_tab:create_module({
     title = "Spectate Mode",
@@ -1401,6 +1496,63 @@ spectate_module:create_dropdown({
                 Workspace.CurrentCamera.CameraType = Enum.CameraType.Follow
                 Workspace.CurrentCamera.CameraSubject = closest.Humanoid
             end
+        end
+    end
+})
+
+local music_player_module = utilities_tab:create_module({
+    title = "Music Player",
+    flag = "Music_Player",
+    description = "Plays music from a Roblox Asset ID",
+    section = "right",
+    callback = function(value) end
+})
+
+local musicIdTextbox = nil
+
+music_player_module:create_textbox({
+    title = "Music Asset ID",
+    flag = "Music_ID_Input",
+    text = "rbxassetid://585489811", -- Example: Elevator music
+    callback = function(text)
+        -- No direct action, applied via button
+    end,
+    reference = function(textbox)
+        musicIdTextbox = textbox
+    end
+})
+
+music_player_module:create_checkbox({
+    title = "Play Music",
+    flag = "Play_Music_Button",
+    callback = function()
+        local musicId = musicIdTextbox and musicIdTextbox.text or ""
+        if musicId ~= "" then
+            if currentMusicSound then
+                currentMusicSound:Stop()
+                currentMusicSound:Destroy()
+            end
+            currentMusicSound = Instance.new("Sound")
+            currentMusicSound.SoundId = musicId
+            currentMusicSound.Parent = Workspace
+            currentMusicSound.Looped = true
+            currentMusicSound:Play()
+            warn("Playing music: " .. musicId)
+        else
+            warn("Please enter a Music Asset ID.")
+        end
+    end
+})
+
+music_player_module:create_checkbox({
+    title = "Stop Music",
+    flag = "Stop_Music_Button",
+    callback = function()
+        if currentMusicSound then
+            currentMusicSound:Stop()
+            currentMusicSound:Destroy()
+            currentMusicSound = nil
+            warn("Music stopped.")
         end
     end
 })
@@ -1586,6 +1738,61 @@ local cosmetics_module = cosmetics_tab:create_module({
     end
 })
 
+-- Avatar Tab
+local head_mesh_module = avatar_tab:create_module({
+    title = "Head Mesh Changer",
+    flag = "Head_Mesh_Changer",
+    description = "Changes your head mesh to a specified ID",
+    section = "left",
+    callback = function(value) end
+})
+
+local headMeshIdTextbox = nil
+
+head_mesh_module:create_textbox({
+    title = "Head Mesh ID",
+    flag = "Head_Mesh_ID_Input",
+    text = "rbxassetid://104992982", -- Default to blocky head
+    callback = function(text)
+        -- No direct action, applied via button
+    end,
+    reference = function(textbox)
+        headMeshIdTextbox = textbox
+    end
+})
+
+head_mesh_module:create_checkbox({
+    title = "Apply Head Mesh",
+    flag = "Apply_Head_Mesh_Button",
+    callback = function()
+        local meshId = headMeshIdTextbox and headMeshIdTextbox.text or ""
+        if meshId ~= "" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
+            local head = LocalPlayer.Character.Head
+            local mesh = head:FindFirstChildOfClass("SpecialMesh") or Instance.new("SpecialMesh")
+            mesh.MeshId = meshId
+            mesh.Parent = head
+            warn("Applied head mesh: " .. meshId)
+        else
+            warn("Invalid Head Mesh ID or character not found.")
+        end
+    end
+})
+
+head_mesh_module:create_checkbox({
+    title = "Reset Head Mesh",
+    flag = "Reset_Head_Mesh_Button",
+    callback = function()
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
+            local head = LocalPlayer.Character.Head
+            local mesh = head:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh:Destroy()
+            end
+            warn("Reset head mesh.")
+        end
+    end
+})
+
 -- Debug Tab
 local ping_display_module = debug_tab:create_module({
     title = "Ping Display",
@@ -1657,7 +1864,7 @@ skin_changer_module:create_checkbox({
             getgenv().config.model = swordName
             getgenv().config.anim = swordName
             getgenv().config.fx = swordName
-            getgenv().updateSword()
+            getgenv().updateSword() -- FIXED: Added this line to trigger the sword update
             warn("Attempting to load sword: " .. swordName) -- Original warn
         else
             warn("Please enter a sword name into the textbox.")
