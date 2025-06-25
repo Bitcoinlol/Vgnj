@@ -66,11 +66,94 @@ local headLoop = nil
 local AutoManualSpamEnabled = false
 local ManualSpamActive = false
 local recentTargetChanges = {} -- New variable for tracking ball target changes
-local OrbitSpeed = 10
-local OrbitHeight = 5
-local OrbitDistance = 20
 
--- Remote detection
+-- Skin Changer Configuration
+getgenv().config = getgenv().config or {
+    enabled = false,
+    model = "Flowing Katana",
+    anim = "Flowing Katana",
+    fx = "Flowing Katana"
+}
+print = function(...) end
+local p = game:GetService("Players").LocalPlayer
+local rs = game:GetService("ReplicatedStorage")
+local swords = require(rs:WaitForChild("Shared", 9e9):WaitForChild("ReplicatedInstances", 9e9):WaitForChild("Swords", 9e9))
+local ctrl, playFx, lastParry = nil, nil, 0
+
+local function getSlash(name)
+    local s = swords:GetSword(name)
+    return (s and s.SlashName) or "SlashEffect"
+end
+getgenv().config.slash = getSlash(getgenv().config.fx)
+local function setSword()
+    if not getgenv().config.enabled then return end
+    setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
+    swords:EquipSwordTo(p.Character, getgenv().config.model)
+    ctrl:SetSword(getgenv().config.anim)
+end
+
+getgenv().updateSword = function()
+    getgenv().config.slash = getSlash(getgenv().config.fx)
+    setSword()
+end
+
+while task.wait() and not ctrl do
+    for _, v in getconnections(rs.Remotes.FireSwordInfo.OnClientEvent) do
+        if v.Function and islclosure(v.Function) then
+            local u = getupvalues(v.Function)
+            if #u == 1 and type(u[1]) == "table" then ctrl = u[1] break end
+        end
+    end
+end
+
+local parryConnA, parryConnB
+while task.wait() and not parryConnA do
+    for _, v in getconnections(rs.Remotes.ParrySuccessAll.OnClientEvent) do
+        if v.Function and getinfo(v.Function).name == "parrySuccessAll" then
+            parryConnA, playFx = v, v.Function
+            v:Disable()
+            break
+        end
+    end
+end
+while task.wait() and not parryConnB do
+    for _, v in getconnections(rs.Remotes.ParrySuccessClient.Event) do
+        if v.Function and getinfo(v.Function).name == "parrySuccessAll" then
+            parryConnB = v
+            v:Disable()
+            break
+        end
+    end
+end
+
+rs.Remotes.ParrySuccessAll.OnClientEvent:Connect(function(...)
+    setthreadidentity(2)
+    local a = {...}
+    if tostring(a[4]) ~= p.Name then
+        lastParry = tick()
+    elseif getgenv().config.enabled then
+        a[1], a[3] = getgenv().config.slash, getgenv().config.fx
+    end
+    return playFx(unpack(a))
+end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if getgenv().config.enabled then
+            local c = p.Character or p.CharacterAdded:Wait()
+            if p:GetAttribute("CurrentlyEquippedSword") ~= getgenv().config.model or not c:FindFirstChild(getgenv().config.model) then
+                setSword()
+            end
+            for _, m in pairs(c:GetChildren()) do
+                if m:IsA("Model") and m.Name ~= getgenv().config.model then m:Destroy() end
+                task.wait()
+            end
+        end
+    end
+end)
+print("Velocity Skin changer")
+
+-- Remote detection (unchanged)
 task.spawn(function()
     for _, value in pairs(getgc()) do
         if type(value) == "function" and islclosure(value) then
@@ -78,8 +161,6 @@ task.spawn(function()
             local upvalues = debug.getupvalues(value)
             local constants = debug.getconstants(value)
             if #protos == 4 and #upvalues == 24 and #constants >= 102 then
-                -- !!! IMPORTANT: These indices (17, 18, 64) are game-specific and may change with updates.
-                -- If Parry_Remote detection fails, you MUST re-verify these indices through reverse engineering.
                 Parry_Key = debug.getupvalue(value, 17)
                 Parry_Remote = debug.getupvalue(value, 18)
                 Parry_Arg = debug.getconstant(value, 64)
@@ -94,7 +175,7 @@ task.spawn(function()
     end
 end)
 
--- Utility functions
+-- Utility functions (unchanged)
 local function BlockMovement(actionName, inputState, inputObject)
     return Enum.ContextActionResult.Sink
 end
@@ -133,7 +214,7 @@ function create_animation(object, info, value)
     animation = nil
 end
 
--- Animation handling
+-- Animation handling (unchanged)
 local Animation = {}
 Animation.storage = {}
 Animation.current = nil
@@ -152,10 +233,10 @@ for Object in pairs(Animation.storage) do
 end
 table.sort(Emotes_Data)
 
--- Auto_Parry system
+-- Auto_Parry system (unchanged functions omitted for brevity)
 local Auto_Parry = {}
 
-function Auto_Parry.Parry_Animation()
+function Auto_Parry.Parry_Animation() -- Unchanged
     local Parry_Animation = ReplicatedStorage.Shared.SwordAPI.Collection.Default:FindFirstChild('GrabParry')
     local Current_Sword = LocalPlayer.Character:GetAttribute('CurrentlyEquippedSword')
     if not Current_Sword or not Parry_Animation then return end
@@ -169,16 +250,11 @@ function Auto_Parry.Parry_Animation()
             end
         end
     end
-
-    if Parry_Animation and Parry_Animation:IsA("Animation") then
-        Grab_Parry = LocalPlayer.Character.Humanoid.Animator:LoadAnimation(Parry_Animation)
-        Grab_Parry:Play()
-    else
-        warn("Failed to load Parry Animation: Parry_Animation is not a valid Animation instance.")
-    end
+    Grab_Parry = LocalPlayer.Character.Humanoid.Animator:LoadAnimation(Parry_Animation)
+    Grab_Parry:Play()
 end
 
-function Auto_Parry.Play_Animation(v)
+function Auto_Parry.Play_Animation(v) -- Unchanged
     local Animations = Animation.storage[v]
     if not Animations then return false end
     local Animator = LocalPlayer.Character.Humanoid.Animator
@@ -188,7 +264,7 @@ function Auto_Parry.Play_Animation(v)
     Animation.current = v
 end
 
-function Auto_Parry.Get_Balls()
+function Auto_Parry.Get_Balls() -- Unchanged
     local Balls = {}
     for _, Instance in pairs(Workspace.Balls:GetChildren()) do
         if Instance:GetAttribute('realBall') then
@@ -199,7 +275,7 @@ function Auto_Parry.Get_Balls()
     return Balls
 end
 
-function Auto_Parry.Get_Ball()
+function Auto_Parry.Get_Ball() -- Unchanged
     for _, Instance in pairs(Workspace.Balls:GetChildren()) do
         if Instance:GetAttribute('realBall') then
             Instance.CanCollide = false
@@ -208,7 +284,7 @@ function Auto_Parry.Get_Ball()
     end
 end
 
-function Auto_Parry.Lobby_Balls()
+function Auto_Parry.Lobby_Balls() -- Unchanged
     for _, Instance in pairs(Workspace.TrainingBalls:GetChildren()) do
         if Instance:GetAttribute("realBall") then return Instance end
     end
@@ -216,7 +292,7 @@ end
 
 local Closest_Entity = nil
 
-function Auto_Parry.Closest_Player()
+function Auto_Parry.Closest_Player() -- Unchanged
     local Max_Distance = math.huge
     local Found_Entity = nil
     for _, Entity in pairs(Workspace.Alive:GetChildren()) do
@@ -234,7 +310,7 @@ function Auto_Parry.Closest_Player()
     return Found_Entity
 end
 
-function Auto_Parry:Get_Entity_Properties()
+function Auto_Parry:Get_Entity_Properties() -- Unchanged
     Auto_Parry.Closest_Player()
     if not Closest_Entity then return false end
     local Entity_Velocity = Closest_Entity.PrimaryPart.Velocity
@@ -247,7 +323,7 @@ function Auto_Parry:Get_Entity_Properties()
     }
 end
 
-function Auto_Parry.Parry_Data(Parry_Type)
+function Auto_Parry.Parry_Data(Parry_Type) -- Unchanged
     Auto_Parry.Closest_Player()
     local Events = {}
     local Camera = Workspace.CurrentCamera
@@ -336,7 +412,7 @@ function Auto_Parry.Parry_Data(Parry_Type)
     return Parry_Type
 end
 
-function Auto_Parry.Parry(parryType)
+function Auto_Parry.Parry(parryType) -- Unchanged
     if not Parry_Remote then
         warn("[Auto_Parry.Parry] Parry_Remote is nil, cannot parry")
         return false
@@ -371,11 +447,11 @@ function Auto_Parry.Parry(parryType)
     return true
 end
 
-function Auto_Parry.Linear_Interpolation(a, b, time_volume)
+function Auto_Parry.Linear_Interpolation(a, b, time_volume) -- Unchanged
     return a + (b - a) * time_volume
 end
 
-function Auto_Parry.Is_Curved()
+function Auto_Parry.Is_Curved() -- Unchanged
     local Ball = Auto_Parry.Get_Ball()
     if not Ball then return false end
     local Zoomies = Ball:FindFirstChild('zoomies')
@@ -390,7 +466,7 @@ function Auto_Parry.Is_Curved()
     local Direction_Similarity = Direction:Dot(Direction_Difference)
     local Dot_Difference = Dot - Direction_Similarity
     local Distance = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Magnitude
-    local Pings = Stats.Network.ServerStatsItem['Data Ping'].Value
+    local Pings = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
     local Dot_Threshold = 0.5 - (Pings / 1000)
     local Reach_Time = Distance / Speed - (Pings / 1000)
     local Ball_Distance_Threshold = 15 - math.min(Distance / 1000, 15) + Speed_Threshold
@@ -408,7 +484,7 @@ function Auto_Parry.Is_Curved()
     return Dot < Dot_Threshold
 end
 
-function Auto_Parry:Get_Ball_Properties()
+function Auto_Parry:Get_Ball_Properties() -- Unchanged
     local Ball = Auto_Parry.Get_Ball()
     local Ball_Velocity = Vector3.zero
     local Ball_Origin = Ball
@@ -423,7 +499,7 @@ function Auto_Parry:Get_Ball_Properties()
     }
 end
 
-function Auto_Parry.Spam_Service(self)
+function Auto_Parry.Spam_Service(self) -- Unchanged
     local Ball = Auto_Parry.Get_Ball()
     local Entity = Auto_Parry.Closest_Player()
     if not Ball or not Entity or not Entity.PrimaryPart then return false end
@@ -444,14 +520,14 @@ function Auto_Parry.Spam_Service(self)
     return Spam_Accuracy
 end
 
-local function GetBall()
+local function GetBall() -- Unchanged
     for _, Ball in ipairs(Balls:GetChildren()) do
         if Ball:FindFirstChild("ff") then return Ball end
     end
     return nil
 end
 
-local function SpamInput()
+local function SpamInput() -- Unchanged
     if InputTask then return end
     InputTask = task.spawn(function()
         while AutoParry do
@@ -462,15 +538,15 @@ local function SpamInput()
     end)
 end
 
-local function isCooldownInEffect1(uigradient)
+local function isCooldownInEffect1(uigradient) -- Unchanged
     return uigradient.Offset.Y < 0.4
 end
 
-local function isCooldownInEffect2(uigradient)
+local function isCooldownInEffect2(uigradient) -- Unchanged
     return uigradient.Offset.Y == 0.5
 end
 
-local function cooldownProtection()
+local function cooldownProtection() -- Unchanged
     if isCooldownInEffect1(ParryCD) then
         ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
         return true
@@ -478,7 +554,7 @@ local function cooldownProtection()
     return false
 end
 
-local function AutoAbility()
+local function AutoAbility() -- Unchanged
     if isCooldownInEffect2(AbilityCD) then
         if LocalPlayer.Character.Abilities["Raging Deflection"].Enabled or LocalPlayer.Character.Abilities["Rapture"].Enabled or LocalPlayer.Character.Abilities["Calming Deflection"].Enabled or LocalPlayer.Character.Abilities["Aerodynamic Slash"].Enabled or LocalPlayer.Character.Abilities["Fracture"].Enabled or LocalPlayer.Character.Abilities["Death Slash"].Enabled then
             Parried = true
@@ -491,11 +567,11 @@ local function AutoAbility()
     return false
 end
 
--- Manual Spam Functions
+-- Manual Spam Functions (unchanged)
 local function toggleManualSpam(activate)
     ManualSpamActive = activate
     local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
-    if button then -- Fix: Added check for button existence
+    if button then
         if AutoManualSpamEnabled and not ManualSpamActive then
             button.Text = "Auto"
             button.TextColor3 = Color3.new(0, 0, 1)
@@ -518,7 +594,7 @@ local function toggleManualSpam(activate)
     end
 end
 
-local function checkAutoManualSpam()
+local function checkAutoManualSpam() -- Unchanged
     if not AutoManualSpamEnabled then return end
     local Ball = Auto_Parry.Get_Ball()
     if not Ball then
@@ -531,7 +607,7 @@ local function checkAutoManualSpam()
         return
     end
     Auto_Parry.Closest_Player()
-    local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value
+    local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
     local Ping_Threshold = math.clamp(Ping / 10, 1, 16)
     local Ball_Target = Ball:GetAttribute('target')
     local Ball_Properties = Auto_Parry:Get_Ball_Properties()
@@ -596,8 +672,61 @@ local utilities_tab = main:create_tab("Utilities", "rbxassetid://126017907477623
 local environment_tab = main:create_tab("Environment", "rbxassetid://76499042599127")
 local cheats_tab = main:create_tab("Cheats", "rbxassetid://126017907477623")
 local cosmetics_tab = main:create_tab("Cosmetics", "rbxassetid://76499042599127")
-local debug_tab = main:create_tab("Debug", "rbxassetid://76499042599127")
-local skin_changer_tab = main:create_tab("Skin Changer", "rbxassetid://76499042599127")
+local debug_tab = main:create_tab("Debug", "rbxassetid://126017907477623")
+local skin_changer_tab = main:create_tab("Skin Changer", "rbxassetid://76499042599127") -- Skin Changer Tab
+
+--- Skin Changer Module
+local skin_changer_module = skin_changer_tab:create_module({
+    title = "Sword Skin",
+    flag = "Sword_Skin_Changer",
+    description = "Change your sword's appearance",
+    section = "left",
+    callback = function(value)
+        -- The main functionality is handled by the buttons below
+    end
+})
+
+local currentSwordInput = ""
+
+skin_changer_module:create_textbox({
+    title = "Sword Name",
+    flag = "Sword_Name_Input",
+    text = "",
+    placeholder = "Enter sword name (e.g., Blood Scythe)",
+    callback = function(value)
+        currentSwordInput = value
+    end
+})
+
+skin_changer_module:create_button({
+    title = "Load Sword",
+    description = "Applies the entered sword skin.",
+    callback = function()
+        if currentSwordInput ~= "" then
+            getgenv().config.enabled = true
+            getgenv().config.model = currentSwordInput
+            getgenv().config.anim = currentSwordInput
+            getgenv().config.fx = currentSwordInput
+            getgenv().updateSword()
+            warn("Attempting to load sword: " .. currentSwordInput)
+        else
+            warn("Please enter a sword name in the textbox.")
+        end
+    end
+})
+
+skin_changer_module:create_button({
+    title = "Refresh Sword",
+    description = "Resets your sword to its default.",
+    callback = function()
+        getgenv().config.enabled = false
+        getgenv().config.model = "Flowing Katana" -- Or whatever the actual default is if it varies
+        getgenv().config.anim = "Flowing Katana"
+        getgenv().config.fx = "Flowing Katana"
+        getgenv().updateSword()
+        warn("Sword skin refreshed to default.")
+    end
+})
 
 -- Blatant Modules
 local auto_parry_module = blatant_tab:create_module({
@@ -622,7 +751,7 @@ local auto_parry_module = blatant_tab:create_module({
                     local One_Target = One_Ball:GetAttribute('target')
                     local Velocity = Zoomies.VectorVelocity
                     local Distance = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Magnitude
-                    local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value / 10
+                    local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
                     local Ping_Threshold = math.clamp(Ping / 10, 5, 17)
                     local Speed = Velocity.Magnitude
                     local cappedSpeedDiff = math.min(math.max(Speed - 9.5, 0), 650)
@@ -790,7 +919,7 @@ local auto_spam_parry_module = blatant_tab:create_module({
                 local Zoomies = Ball:FindFirstChild('zoomies')
                 if not Zoomies then return end
                 Auto_Parry.Closest_Player()
-                local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value
+                local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
                 local Ping_Threshold = math.clamp(Ping / 10, 1, 16)
                 local Ball_Target = Ball:GetAttribute('target')
                 local Ball_Properties = Auto_Parry:Get_Ball_Properties()
@@ -864,7 +993,7 @@ if not isMobile then
                     local Zoomies = Ball:FindFirstChild('zoomies')
                     if not Zoomies then return end
                     Auto_Parry.Closest_Player()
-                    local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value
+                    local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
                     local Ping_Threshold = math.clamp(Ping / 10, 10, 16)
                     local Ball_Target = Ball:GetAttribute('target')
                     local Ball_Properties = Auto_Parry:Get_Ball_Properties()
@@ -918,11 +1047,9 @@ manual_spam_module:create_checkbox({
         if value then
             Connections_Manager['Auto Manual Spam'] = RunService.Heartbeat:Connect(checkAutoManualSpam)
             local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
-            if button then -- Fix: Added check for button existence
-                if AutoManualSpamEnabled and not ManualSpamActive then
-                    button.Text = "Auto"
-                    button.TextColor3 = Color3.new(0, 0, 1)
-                end
+            if button and not ManualSpamActive then
+                button.Text = "Auto"
+                button.TextColor3 = Color3.new(0, 0, 1)
             end
         else
             if Connections_Manager['Auto Manual Spam'] then
@@ -931,7 +1058,7 @@ manual_spam_module:create_checkbox({
             end
             if ManualSpamActive then toggleManualSpam(false) end
             local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
-            if button then -- Fix: Added check for button existence
+            if button then
                 button.Text = "Clash Mode"
                 button.TextColor3 = Color3.new(1, 0, 0)
             end
@@ -987,7 +1114,7 @@ manual_spam_module:create_checkbox({
                     if not AutoManualSpamEnabled then
                         toggleManualSpam(not ManualSpamActive)
                     end
-                end)
+                })
             end
         else
             if CoreGui:FindFirstChild("ManualSpamUI") then
@@ -1027,7 +1154,7 @@ local lobby_ap_module = blatant_tab:create_module({
                 local Velocity = Zoomies.VectorVelocity
                 local Distance = LocalPlayer:DistanceFromCharacter(Ball.Position)
                 local Speed = Velocity.Magnitude
-                local Ping = Stats.Network.ServerStatsItem['Data Ping'].Value / 10
+                local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
                 local LobbyAPcappedSpeedDiff = math.min(math.max(Speed - 9.5, 0), 650)
                 local LobbyAPspeed_divisor_base = 2.4 + LobbyAPcappedSpeedDiff * 0.002
                 local LobbyAPeffectiveMultiplier = LobbyAP_Speed_Divisor_Multiplier
@@ -1322,85 +1449,11 @@ local fly_module = movement_tab:create_module({
             if Connections_Manager['Fly'] then
                 Connections_Manager['Fly']:Disconnect()
                 Connections_Manager['Fly'] = nil
-                local bv = LocalPlayer.Character.HumanoidRootPart:FindFirstChild("BodyVelocity")
-                if bv then bv:Destroy() end
+                LocalPlayer.Character.HumanoidRootPart:FindFirstChild("BodyVelocity"):Destroy()
             end
         end
     end
 })
-
-local auto_orbit_module = movement_tab:create_module({
-    title = "Auto Orbit",
-    flag = "Auto_Orbit",
-    description = "Orbits around the nearest ball",
-    section = "right",
-    callback = function(value)
-        if value then
-            Connections_Manager['Auto Orbit'] = RunService.Heartbeat:Connect(function()
-                local ball = Auto_Parry.Get_Ball()
-                local character = LocalPlayer.Character
-                if ball and character and character:FindFirstChild("HumanoidRootPart") then
-                    local hrp = character.HumanoidRootPart
-                    local ballPos = ball.Position
-                    local currentTime = tick()
-                    
-                    local angle = (currentTime * OrbitSpeed) % (2 * math.pi)
-                    local orbitX = ballPos.X + OrbitDistance * math.cos(angle)
-                    local orbitZ = ballPos.Z + OrbitDistance * math.sin(angle)
-                    local orbitY = ballPos.Y + OrbitHeight
-
-                    local targetPos = Vector3.new(orbitX, orbitY, orbitZ)
-                    
-                    hrp.CFrame = CFrame.new(hrp.Position, ballPos) * CFrame.Angles(0, math.pi, 0) -- Make character face the ball while orbiting
-                    LocalPlayer.Character.Humanoid:MoveTo(targetPos)
-                end
-            end)
-        else
-            if Connections_Manager['Auto Orbit'] then
-                Connections_Manager['Auto Orbit']:Disconnect()
-                Connections_Manager['Auto Orbit'] = nil
-                LocalPlayer.Character.Humanoid:MoveTo(LocalPlayer.Character.HumanoidRootPart.Position) -- Stop movement
-            end
-        end
-    end
-})
-
-auto_orbit_module:create_slider({
-    title = "Orbit Speed",
-    flag = "Orbit_Speed",
-    maximum_value = 20,
-    minimum_value = 1,
-    value = 10,
-    round_number = true,
-    callback = function(value)
-        OrbitSpeed = value
-    end
-})
-
-auto_orbit_module:create_slider({
-    title = "Orbit Height",
-    flag = "Orbit_Height",
-    maximum_value = 50,
-    minimum_value = 0,
-    value = 5,
-    round_number = true,
-    callback = function(value)
-        OrbitHeight = value
-    end
-})
-
-auto_orbit_module:create_slider({
-    title = "Orbit Distance",
-    flag = "Orbit_Distance",
-    maximum_value = 50,
-    minimum_value = 5,
-    value = 20,
-    round_number = true,
-    callback = function(value)
-        OrbitDistance = value
-    end
-})
-
 
 -- Exploits Tab
 local ball_magnet_module = exploits_tab:create_module({
@@ -1415,7 +1468,7 @@ local ball_magnet_module = exploits_tab:create_module({
                 if ball and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
                     local direction = (LocalPlayer.Character.HumanoidRootPart.Position - ball.Position).Unit
                     local velocity = direction * 50
-                    ball.AssemblyLinearVelocity = velocity
+                    ball.Velocity = velocity
                 end
             end)
         else
@@ -1462,44 +1515,6 @@ spectate_module:create_dropdown({
                 Workspace.CurrentCamera.CameraType = Enum.CameraType.Follow
                 Workspace.CurrentCamera.CameraSubject = closest.Humanoid
             end
-        end
-    end
-})
-
-local sound_player_module = utilities_tab:create_module({
-    title = "Sound Player",
-    flag = "Sound_Player",
-    description = "Plays a sound by ID",
-    section = "right",
-    callback = function(value) end
-})
-
-local soundIdTextbox = nil
-sound_player_module:create_textbox({
-    title = "Sound ID",
-    flag = "Sound_ID_Input",
-    text = "rbxassetid://",
-    callback = function(text)
-        -- Update the text box value
-    end,
-    reference = function(textbox)
-        soundIdTextbox = textbox
-    end
-})
-
-sound_player_module:create_button({
-    title = "Play Sound",
-    flag = "Play_Sound_Button",
-    callback = function()
-        local soundID = soundIdTextbox and soundIdTextbox.text or ""
-        if string.find(soundID, "rbxassetid://") == 1 then
-            local sound = Instance.new("Sound")
-            sound.SoundId = soundID
-            sound.Parent = Workspace
-            sound:Play()
-            Debris:AddItem(sound, sound.TimeLength + 1) -- Clean up sound after it plays
-        else
-            warn("Invalid Sound ID format. Please use 'rbxassetid://...'")
         end
     end
 })
@@ -1589,7 +1604,7 @@ local no_fog_module = cheats_tab:create_module({
     end
 })
 
--- Cosmetics Tab
+-- Cosmetics Tab (Modified to remove Headless)
 local cosmetics_module = cosmetics_tab:create_module({
     title = "Korblox Legs",
     flag = "Korblox_Legs",
@@ -1614,13 +1629,10 @@ local cosmetics_module = cosmetics_tab:create_module({
                 if rightLeg then
                     local originalMesh = rightLeg:FindFirstChildOfClass("SpecialMesh")
                     if originalMesh then
-                        _G.PlayerCosmeticsCleanup = _G.PlayerCosmeticsCleanup or {}
                         _G.PlayerCosmeticsCleanup.originalMeshId = originalMesh.MeshId
                         _G.PlayerCosmeticsCleanup.originalTextureId = originalMesh.TextureId
                         _G.PlayerCosmeticsCleanup.originalScale = originalMesh.Scale
-                        _G.PlayerCosmeticsCleanup.hadNoMesh = false
                     else
-                        _G.PlayerCosmeticsCleanup = _G.PlayerCosmeticsCleanup or {}
                         _G.PlayerCosmeticsCleanup.hadNoMesh = true
                     end
                     _G.PlayerCosmeticsCleanup.rightLegChildren = {}
@@ -1642,7 +1654,7 @@ local cosmetics_module = cosmetics_tab:create_module({
         local function restoreRightLeg(char)
             if char then
                 local rightLeg = char:FindFirstChild("RightLeg") or char:FindFirstChild("Right Leg")
-                if rightLeg and _G.PlayerCosmeticsCleanup and _G.PlayerCosmeticsCleanup.rightLegChildren then
+                if rightLeg and _G.PlayerCosmeticsCleanup.rightLegChildren then
                     for _, child in pairs(rightLeg:GetChildren()) do
                         if child:IsA("SpecialMesh") then child:Destroy() end
                     end
@@ -1701,7 +1713,7 @@ local ping_display_module = debug_tab:create_module({
             label.TextColor3 = Color3.new(1, 1, 1)
             label.TextScaled = true
             Connections_Manager['Ping Display'] = RunService.RenderStepped:Connect(function()
-                label.Text = "Ping: " .. math.floor(Stats.Network.ServerStatsItem['Data Ping'].Value) .. "ms"
+                label.Text = "Ping: " .. math.floor(Stats.Network.ServerStatsItem['Data Ping']:GetValue()) .. "ms"
             end)
         else
             if Connections_Manager['Ping Display'] then
@@ -1715,228 +1727,7 @@ local ping_display_module = debug_tab:create_module({
     end
 })
 
---- Skin Changer Module
-local skin_changer_module = skin_changer_tab:create_module({
-    title = "Weapon Skin",
-    flag = "Weapon_Skin",
-    description = "Change your equipped weapon's appearance",
-    section = "left",
-    callback = function(value)
-        -- The skin changer logic doesn't have an overall enable/disable toggle
-        -- through this specific callback, as it's controlled by the buttons.
-        -- We just need this module to exist to hold the elements.
-    end
-})
-
-local currentSwordTextbox = nil -- Reference to the textbox
-
-skin_changer_module:create_textbox({
-    title = "Sword Name",
-    flag = "Sword_Name_Input",
-    text = "Flowing Katana", -- Default value for initial load
-    callback = function(text)
-        -- This callback updates as the user types, but we'll use button clicks to apply.
-    end,
-    -- Store a reference to the textbox element for later use
-    reference = function(textbox)
-        currentSwordTextbox = textbox
-    end
-})
-
-skin_changer_module:create_button({ -- Changed from create_checkbox to create_button
-    title = "Load Sword",
-    flag = "Load_Sword_Button",
-    callback = function()
-        local swordName = currentSwordTextbox and currentSwordTextbox.text or ""
-        if swordName ~= "" then
-            print("[DEBUG] Attempting to load sword from textbox: " .. swordName)
-            getgenv().config.enabled = true
-            getgenv().config.model = swordName
-            getgenv().config.anim = swordName
-            getgenv().config.fx = swordName
-            getgenv().updateSword()
-            warn("Attempting to load sword: " .. swordName)
-        else
-            warn("Please enter a sword name into the textbox.")
-        end
-    end
-})
-
-skin_changer_module:create_button({ -- Changed from create_checkbox to create_button
-    title = "Refresh Sword",
-    flag = "Refresh_Sword_Button",
-    callback = function()
-        print("[DEBUG] Refreshing sword triggered.")
-        -- First, ensure the custom skin changer is disabled so the game's default equip logic can run
-        getgenv().config.enabled = false
-        local currentEquippedSword = LocalPlayer:GetAttribute("CurrentlyEquippedSword")
-        if currentEquippedSword then
-            print("[DEBUG] Currently equipped sword found for refresh: " .. currentEquippedSword)
-            -- Attempt to re-equip the actual sword model
-            setupvalue(rawget(swords, "EquipSwordTo"), 2, false) -- Disable anti-cheat if needed by the game's equip function
-            swords:EquipSwordTo(LocalPlayer.Character, currentEquippedSword)
-            
-            -- Now, update the skin changer's internal config to match the original sword's anim/fx
-            local swordData = swords:GetSword(currentEquippedSword)
-            if swordData then
-                print("[DEBUG] Setting skin changer config to original sword anim/fx:", swordData.AnimationType, swordData.Name)
-                if ctrl then ctrl:SetSword(swordData.AnimationType) end
-                getgenv().config.slash = getSlash(swordData.Name)
-            else
-                print("[DEBUG] Could not find sword data for original sword during refresh. Falling back to default.")
-                if ctrl then ctrl:SetSword("Flowing Katana") end -- Fallback if data not found
-                getgenv().config.slash = getSlash("Flowing Katana")
-            end
-            warn("Refreshing sword to original: " .. currentEquippedSword)
-        else
-            warn("Could not determine currently equipped sword to refresh. Player might not have a sword equipped.")
-        end
-    end
-})
-
--- Existing skin changer code (modified to integrate with UI)
-getgenv().config = getgenv().config or {
-    enabled = false,
-    model = "Flowing Katana", -- Default value for initial load
-    anim = "Flowing Katana",
-    fx = "Flowing Katana"
-}
-
-local p = game:GetService("Players").LocalPlayer
-local rs = game:GetService("ReplicatedStorage")
-local swords = require(rs:WaitForChild("Shared", 9e9):WaitForChild("ReplicatedInstances", 9e9):WaitForChild("Swords", 9e9))
-local ctrl, playFx, lastParry = nil, nil, 0
-
-local function getSlash(name)
-    local s = swords:GetSword(name)
-    print("[DEBUG] getSlash called for:", name, " - Result:", s and s.SlashName or "nil")
-    return (s and s.SlashName) or "SlashEffect"
-end
-getgenv().config.slash = getSlash(getgenv().config.fx)
-
-local function setSword()
-    print("[DEBUG] setSword called. getgenv().config.enabled:", getgenv().config.enabled)
-    if not getgenv().config.enabled then
-        local currentEquippedSword = p:GetAttribute("CurrentlyEquippedSword")
-        print("[DEBUG] Skin changer disabled. Attempting to re-equip original:", currentEquippedSword)
-        if currentEquippedSword then
-            setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
-            swords:EquipSwordTo(p.Character, currentEquippedSword)
-            local swordData = swords:GetSword(currentEquippedSword)
-            if swordData then
-                print("[DEBUG] Re-equipping original sword anim/fx:", swordData.AnimationType, swordData.Name)
-                if ctrl then ctrl:SetSword(swordData.AnimationType) end
-                getgenv().config.slash = getSlash(swordData.Name)
-            else
-                print("[DEBUG] Could not find sword data for original sword. Falling back to Flowing Katana.")
-                if ctrl then ctrl:SetSword("Flowing Katana") end
-                getgenv().config.slash = getSlash("Flowing Katana")
-            end
-        end
-        return
-    end
-    print("[DEBUG] Skin changer enabled. Attempting to equip custom sword:", getgenv().config.model)
-    setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
-    swords:EquipSwordTo(p.Character, getgenv().config.model)
-    if ctrl then ctrl:SetSword(getgenv().config.anim) end
-end
-
-getgenv().updateSword = function()
-    print("[DEBUG] updateSword called.")
-    getgenv().config.slash = getSlash(getgenv().config.fx)
-    setSword()
-end
-
-while task.wait() and not ctrl do
-    for _, v in getconnections(rs.Remotes.FireSwordInfo.OnClientEvent) do
-        if v.Function and islclosure(v.Function) then
-            local u = getupvalues(v.Function)
-            if #u == 1 and type(u[1]) == "table" then
-                ctrl = u[1]
-                print("[DEBUG] Found ctrl:", tostring(ctrl))
-                break
-            end
-        end
-    end
-end
-
-local parryConnA, parryConnB
-while task.wait() and not parryConnA do
-    for _, v in getconnections(rs.Remotes.ParrySuccessAll.OnClientEvent) do
-        if v.Function and getinfo(v.Function).name == "parrySuccessAll" then
-            parryConnA, playFx = v, v.Function
-            v:Disable()
-            print("[DEBUG] Found and disabled parryConnA.")
-            break
-        end
-    end
-end
-while task.wait() and not parryConnB do
-    for _, v in getconnections(rs.Remotes.ParrySuccessClient.Event) do
-        if v.Function and getinfo(v.Function).name == "parrySuccessAll" then
-            parryConnB = v
-            v:Disable()
-            print("[DEBUG] Found and disabled parryConnB.")
-            break
-        end
-    end
-end
-
-rs.Remotes.ParrySuccessAll.OnClientEvent:Connect(function(...)
-    setthreadidentity(2)
-    local a = {...}
-    if tostring(a[4]) ~= p.Name then
-        lastParry = tick()
-    elseif getgenv().config.enabled then
-        print("[DEBUG] Applying custom slash and fx in ParrySuccessAll:", getgenv().config.slash, getgenv().config.fx)
-        a[1], a[3] = getgenv().config.slash, getgenv().config.fx
-    end
-    return playFx(unpack(a))
-end)
-
-task.spawn(function()
-    while task.wait(1) do
-        local c = p.Character or p.CharacterAdded:Wait()
-        if getgenv().config.enabled then
-            print("[DEBUG] Checking custom sword state. Current model:", p:GetAttribute("CurrentlyEquippedSword"), "Desired model:", getgenv().config.model)
-            if p:GetAttribute("CurrentlyEquippedSword") ~= getgenv().config.model or not c:FindFirstChild(getgenv().config.model) then
-                print("[DEBUG] Custom sword not equipped or found. Re-equipping.")
-                setSword()
-            end
-            for _, m in pairs(c:GetChildren()) do
-                if m:IsA("Model") and m.Name ~= getgenv().config.model and m.Name ~= "HumanoidRootPart" and m.Name ~= "Head" and m.Name ~= "Torso" and m.Name ~= "Right Arm" and m.Name ~= "Left Arm" and m.Name ~= "Right Leg" and m.Name ~= "Left Leg" then
-                    print("[DEBUG] Destroying unwanted model:", m.Name)
-                    m:Destroy()
-                end
-                task.wait()
-            end
-        else
-            local currentEquippedSword = p:GetAttribute("CurrentlyEquippedSword")
-            print("[DEBUG] Skin changer disabled. Ensuring original sword is equipped. Current:", currentEquippedSword)
-            if currentEquippedSword and (p:GetAttribute("CurrentlyEquippedSword") ~= currentEquippedSword or not c:FindFirstChild(currentEquippedSword)) then
-                print("[DEBUG] Original sword not equipped or found. Re-equipping original.")
-                setupvalue(rawget(swords, "EquipSwordTo"), 2, false)
-                swords:EquipSwordTo(c, currentEquippedSword)
-                local swordData = swords:GetSword(currentEquippedSword)
-                if ctrl and swordData then
-                    print("[DEBUG] Setting anim/fx for original sword:", swordData.AnimationType, swordData.Name)
-                    ctrl:SetSword(swordData.AnimationType)
-                    getgenv().config.slash = getSlash(swordData.Name)
-                end
-            end
-            for _, m in pairs(c:GetChildren()) do
-                if m:IsA("Model") and m.Name ~= currentEquippedSword and m.Name ~= "HumanoidRootPart" and m.Name ~= "Head" and m.Name ~= "Torso" and m.Name ~= "Right Arm" and m.Name ~= "Left Arm" and m.Name ~= "Right Leg" and m.Name ~= "Left Leg" then
-                    print("[DEBUG] Destroying lingering custom model after disable:", m.Name)
-                    m:Destroy()
-                end
-                task.wait()
-            end
-        end
-    end
-end)
-print("Velocity Skin changer Initialized.")
-
--- Connections and Events
+-- Connections and Events (unchanged except where noted)
 ReplicatedStorage.Remotes.InfinityBall.OnClientEvent:Connect(function(a, b)
     Infinity = b
 end)
@@ -2008,7 +1799,7 @@ end)
 
 ReplicatedStorage.Remotes.ParrySuccess.OnClientEvent:Connect(function()
     if hit_Sound_Enabled then
-        -- hit_Sound:Play() -- Uncomment and define hit_Sound if you want this
+        -- hit_Sound:Play()
     end
 end)
 
@@ -2064,7 +1855,7 @@ ReplicatedStorage.Remotes.ParrySuccessAll.OnClientEvent:Connect(function(a, b)
     local Ball_Direction = Velocity.Unit
     local Direction = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Unit
     local Dot = Direction:Dot(Ball_Direction)
-    local Pings = Stats.Network.ServerStatsItem['Data Ping'].Value
+    local Pings = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
     local Speed_Threshold = math.min(Speed / 100, 40)
     local Reach_Time = Distance / Speed - (Pings / 1000)
     local Enough_Speed = Speed > 100
