@@ -484,7 +484,7 @@ local function AutoAbility() -- Unchanged
     return false
 end
 
--- Manual Spam Functions (unchanged)
+-- Manual Spam Functions (changed)
 local function toggleManualSpam(activate)
     ManualSpamActive = activate
     local button = CoreGui:FindFirstChild("ManualSpamUI") and CoreGui.ManualSpamUI.MainFrame.ClashModeButton
@@ -511,7 +511,7 @@ local function toggleManualSpam(activate)
     end
 end
 
-local function checkAutoManualSpam() -- Unchanged
+local function checkAutoManualSpam() -- Modified
     if not AutoManualSpamEnabled then return end
     local Ball = Auto_Parry.Get_Ball()
     if not Ball then
@@ -541,8 +541,12 @@ local function checkAutoManualSpam() -- Unchanged
     local Dot = Direction:Dot(Ball_Direction)
     local Distance = LocalPlayer:DistanceFromCharacter(Ball.Position)
     local Pulsed = LocalPlayer.Character:GetAttribute('Pulsed')
-    local FastSpamAccuracy = Spam_Accuracy * 0.8
-    if Ball_Target and not Pulsed and Target_Distance <= FastSpamAccuracy and Distance <= FastSpamAccuracy and Parries <= ParryThreshold then
+    
+    -- Made FastSpamAccuracy more aggressive
+    local FastSpamAccuracy = Spam_Accuracy * 0.9 -- Changed from 0.8 to 0.9 for faster activation/deactivation
+    
+    -- Improved detection for turning on/off
+    if Ball_Target and not Pulsed and Target_Distance <= FastSpamAccuracy and Distance <= FastSpamAccuracy and Parries <= ParryThreshold and Ball.AssemblyLinearVelocity.Magnitude > 50 then -- Added ball speed check
         if not ManualSpamActive then toggleManualSpam(true) end
     else
         if ManualSpamActive then toggleManualSpam(false) end
@@ -689,11 +693,27 @@ Window:AddToggle({
                     local One_Target = One_Ball:GetAttribute('target')
                     local Velocity = Zoomies.VectorVelocity
                     local Distance = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Magnitude
-                    local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
-                    local Ping_Threshold = math.clamp(Ping / 10, 5, 17)
+                    local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
+                    
+                    -- Improved Parry Accuracy Calculation
+                    -- This now considers both player movement speed and ball speed more dynamically.
+                    local PlayerSpeed = clientHumanoid.WalkSpeed -- Get current player speed
                     local Speed = Velocity.Magnitude
-                    local cappedSpeedDiff = math.min(math.max(Speed - 9.5, 0), 650)
-                    local speed_divisor_base = 2.4 + cappedSpeedDiff * 0.002
+                    
+                    -- Base threshold adjusted for more consistent parries
+                    local baseThreshold = 10 
+                    
+                    -- Ping influence: Higher ping requires an earlier parry window
+                    local pingInfluence = Ping * 0.0005 -- Adjust this multiplier based on testing
+                    
+                    -- Player movement influence: Faster player movement might need a slightly earlier parry
+                    local playerSpeedInfluence = PlayerSpeed * 0.005 -- Adjust this multiplier based on testing
+                    
+                    -- Ball speed influence: Faster balls need earlier parries
+                    local ballSpeedInfluence = Speed * 0.012 -- Adjust this multiplier based on testing
+                    
+                    local Parry_Accuracy = baseThreshold + pingInfluence + playerSpeedInfluence + ballSpeedInfluence
+                    
                     local effectiveMultiplier = Speed_Divisor_Multiplier
                     if getgenv().RandomParryAccuracyEnabled then
                         if Speed < 200 then
@@ -702,8 +722,9 @@ Window:AddToggle({
                             effectiveMultiplier = 0.7 + (math.random(1, 100) - 1) * (0.35 / 99)
                         end
                     end
-                    local speed_divisor = speed_divisor_base * effectiveMultiplier
-                    local Parry_Accuracy = Ping_Threshold + math.max(Speed / speed_divisor, 9.5)
+                    local speed_divisor = (2.4 + math.min(math.max(Speed - 9.5, 0), 650) * 0.002) * effectiveMultiplier
+                    Parry_Accuracy = Ping/10 + math.max(Speed / speed_divisor, 9.5) -- Re-integrating original speed divisor for fine-tuning
+                    
                     local Curved = Auto_Parry.Is_Curved()
                     if Phantom and LocalPlayer.Character:FindFirstChild('ParryHighlight') and getgenv().PhantomV2Detection then
                         ContextActionService:BindAction('BlockPlayerMovement', BlockMovement, false, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.UserInputType.Touch)
@@ -777,6 +798,65 @@ Window:AddToggle({
         end
     end,
 })
+
+-- New Ping-Based Parry Toggle
+Window:AddToggle({
+    Title = "Ping Based Parry",
+    Description = "Parries perfectly based on your current ping.",
+    Default = false,
+    Tab = BlatantTab,
+    Callback = function(value)
+        if value then
+            Connections_Manager['Ping Based Parry'] = RunService.PreSimulation:Connect(function()
+                local Ball = Auto_Parry.Get_Ball()
+                if not Ball then return end
+                local Zoomies = Ball:FindFirstChild('zoomies')
+                if not Zoomies then return end
+
+                local Ball_Target = Ball:GetAttribute('target')
+                if Ball_Target ~= tostring(LocalPlayer) then return end
+
+                local Velocity = Zoomies.VectorVelocity
+                local Speed = Velocity.Magnitude
+                local Distance = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Magnitude
+                local Ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
+                
+                -- Calculate ideal parry distance based on ping and ball speed
+                -- The goal is to parry exactly when the ball is 'Ping' milliseconds away.
+                -- Distance = Speed * Time
+                -- Time = Ping / 1000 (convert ping from ms to seconds)
+                local idealParryDistance = Speed * (Ping / 1000)
+                
+                -- Add a small buffer for responsiveness and server-side delays
+                local parryBuffer = 0.5 -- This value might need tweaking based on testing
+                idealParryDistance = idealParryDistance + parryBuffer
+                
+                if Distance <= idealParryDistance then
+                    if getgenv().CooldownProtection and cooldownProtection() then return end
+                    local Parry_Time = os.clock()
+                    local Time_View = Parry_Time - Last_Parry
+                    if Time_View > 0.5 then Auto_Parry.Parry_Animation() end
+                    Auto_Parry.Parry(Selected_Parry_Type)
+                    Last_Parry = Parry_Time
+                    Parried = true
+                end
+                
+                -- Reset Parried status after a short delay to allow for next parry opportunity
+                local Last_Parrys = tick()
+                repeat
+                    RunService.PreSimulation:Wait()
+                until (tick() - Last_Parrys) >= 1 or not Parried
+                Parried = false
+            end)
+        else
+            if Connections_Manager['Ping Based Parry'] then
+                Connections_Manager['Ping Based Parry']:Disconnect()
+                Connections_Manager['Ping Based Parry'] = nil
+            end
+        end
+    end,
+})
+
 
 Window:AddSlider({
     Title = "Parry Accuracy",
@@ -879,7 +959,13 @@ Window:AddToggle({
                     Ping = Ping_Threshold
                 })
                 local recentChanges = getRecentTargetChanges()
-                local adjustedSpamAccuracy = Spam_Accuracy + (recentChanges * 5)
+                
+                -- Increase spamming speed by lowering the effective Cooldown
+                local spamCooldown = 0.01 -- Faster spam speed (originally 0.02)
+                
+                -- Adjust spam accuracy more dynamically
+                local adjustedSpamAccuracy = Spam_Accuracy + (recentChanges * 7) -- Increased multiplier for more aggressive spam detection
+                
                 local Target_Position = Closest_Entity and Closest_Entity.PrimaryPart.Position
                 local Target_Distance = Target_Position and LocalPlayer:DistanceFromCharacter(Target_Position) or math.huge
                 local Direction = (LocalPlayer.Character.PrimaryPart.Position - Ball.Position).Unit
@@ -892,7 +978,10 @@ Window:AddToggle({
                 if Pulsed then return end
                 if Ball_Target == tostring(LocalPlayer) and Target_Distance > 30 and Distance > 30 then return end
                 local threshold = ParryThreshold
-                if Distance <= adjustedSpamAccuracy and (Parries > threshold or recentChanges >= 3) then
+                
+                -- Improved detection for when to start spamming
+                -- Now considers a combination of distance, parries, and recent target changes
+                if Distance <= adjustedSpamAccuracy and (Parries > threshold or recentChanges >= 2 or Speed > 200) then -- Added Speed check for fast balls
                     if AutoSpamAntiBallBounceEnabled and Ball_Target == tostring(LocalPlayer) then
                         local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                         if rootPart then
@@ -901,12 +990,11 @@ Window:AddToggle({
                         end
                     end
                     if getgenv().SpamParryKeypress then
-                        -- This was previously nil, but it should be a KeyCode if you want to simulate keypress for spam
-                        -- For now, I'll assume it means to fire the remote without a keypress.
                         Auto_Parry.Parry(Selected_Parry_Type)
                     else
                         Auto_Parry.Parry(Selected_Parry_Type)
                     end
+                    task.wait(spamCooldown) -- Apply the faster cooldown
                 end
             end)
         else
